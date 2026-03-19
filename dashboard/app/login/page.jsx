@@ -18,7 +18,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/login`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/login`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -48,7 +48,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/admin/register`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/admin/register`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
