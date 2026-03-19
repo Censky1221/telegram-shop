@@ -602,15 +602,14 @@ module.exports = function registerHandlers(bot, tenant) {
 
       await ctx.reply(
         `╭------------------- ╮\n` +
-        `│   LIST PRODUK        \n` +
-        `│   page ${safePage} / ${totalPages}              \n` +
-        `---------------------\n` +
+        `┊   LIST PRODUK        \n` +
+        `┊   page ${safePage} / ${totalPages}              \n` +
+        `┊---------------------\n` +
         `${pageItems.map((p, i) => {
           const stock = parseInt(p.stock_count);
           const icon  = stock > 0 ? '✅' : '❌';
           return `│ ${icon} [${start + i + 1}] ${p.name} (${stock})`;
         }).join('\n')}\n` +
-        `│                          \n` +
         `╰------------------- ╯\n\n` +
         `Masukkan nomor untuk melihat detail.`,
         { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
