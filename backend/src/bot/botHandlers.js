@@ -584,9 +584,9 @@ module.exports = function registerHandlers(bot, tenant) {
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
 
       const listText = pageItems.map((p, i) => {
-        const stock    = parseInt(p.stock_count);
-        const stokInfo = stock > 0 ? `✅ Stok ${stock}` : '❌ Habis';
-        return `${start + i + 1}. ${p.name} — ${stokInfo}`;
+        const stock = parseInt(p.stock_count);
+        const icon  = stock > 0 ? '✅' : '❌';
+        return `${icon} [${start + i + 1}] ${p.name} (${stock})`;
       }).join('\n');
 
       const keyRows = [];
