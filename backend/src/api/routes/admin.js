@@ -253,4 +253,20 @@ router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
   }
 });
 
+router.get('/settings', authMiddleware, async (req, res) => {
+  const { rows: [tenant] } = await pool.query(
+    `SELECT banner_file_id FROM tenants WHERE id=$1`, [req.admin.tenant_id]
+  );
+  res.json(tenant || {});
+});
+
+router.put('/settings', authMiddleware, async (req, res) => {
+  const { banner_file_id } = req.body;
+  await pool.query(
+    `UPDATE tenants SET banner_file_id=$1 WHERE id=$2`,
+    [banner_file_id || null, req.admin.tenant_id]
+  );
+  res.json({ success: true });
+});
+
 module.exports = router;

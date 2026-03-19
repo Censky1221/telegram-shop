@@ -9,7 +9,7 @@ const navItems = [
   { href: '/dashboard/orders',    label: '📋 Orders' },
   { href: '/dashboard/users',     label: '👤 Users & Saldo' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
-  { href: '/dashboard/variants', label: '🎛️ Varian' },
+  { href: '/dashboard/settings',  label: '⚙️ Settings' },
 ];
 
 export default function DashboardLayout({ children }) {
@@ -21,7 +21,6 @@ export default function DashboardLayout({ children }) {
     if (!localStorage.getItem('token')) router.push('/login');
   }, []);
 
-  // Tutup sidebar saat navigasi
   useEffect(() => { setOpen(false); }, [pathname]);
 
   function handleLogout() {
@@ -32,7 +31,6 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="flex min-h-screen">
 
-      {/* Overlay mobile */}
       {open && (
         <div
           className="fixed inset-0 bg-black/50 z-20 md:hidden"
@@ -40,7 +38,6 @@ export default function DashboardLayout({ children }) {
         />
       )}
 
-      {/* Sidebar */}
       <aside className={`
         fixed top-0 left-0 h-full w-64 bg-gray-900 text-white flex flex-col z-30
         transform transition-transform duration-300 ease-in-out
@@ -49,7 +46,6 @@ export default function DashboardLayout({ children }) {
       `}>
         <div className="px-6 py-5 border-b border-gray-700 flex items-center justify-between">
           <h1 className="font-semibold text-lg">🛍 Shop Admin</h1>
-          {/* Tombol close di mobile */}
           <button
             onClick={() => setOpen(false)}
             className="md:hidden text-gray-400 hover:text-white text-xl leading-none"
@@ -82,9 +78,7 @@ export default function DashboardLayout({ children }) {
         </div>
       </aside>
 
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar mobile */}
         <header className="md:hidden sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
           <button
             onClick={() => setOpen(true)}

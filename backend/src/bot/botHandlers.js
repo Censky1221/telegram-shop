@@ -43,6 +43,16 @@ module.exports = function registerHandlers(bot, tenant) {
     );
   });
 
+  // ── /fileid — ambil file_id dari gambar ───────────────────
+  bot.command('fileid', async (ctx) => {
+    const photo = ctx.message?.reply_to_message?.photo;
+    if (!photo) return ctx.reply(
+      '📸 Cara pakai:\n1. Kirim gambar ke bot\n2. Reply gambar itu\n3. Ketik /fileid'
+    );
+    const fileId = photo[photo.length - 1].file_id;
+    ctx.reply(`✅ *File ID gambar:*\n\n\`${fileId}\`\n\n_Copy dan paste ke dashboard Settings._`, { parse_mode: 'Markdown' });
+  });
+
   // ── Saldo Saya ────────────────────────────────────────────
   bot.hears('💰 Saldo Saya', async (ctx) => {
     try {
@@ -151,20 +161,20 @@ module.exports = function registerHandlers(bot, tenant) {
 
     const total = product.price * qty;
 
-    const text =
+    await ctx.editMessageText(
       `💳 *Pilih Metode Pembayaran*\n\n` +
       `📦 ${product.name} x${qty}\n` +
       `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
-      `Pilih metode bayar:`;
-
-    await ctx.editMessageText(text, {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_p_${productId}_${qty}`)],
-        [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_p_${productId}_${qty}`)],
-        [Markup.button.callback('❌ Batal', 'cancel_buy')],
-      ]),
-    }).catch(() => {});
+      `Pilih metode bayar:`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_p_${productId}_${qty}`)],
+          [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_p_${productId}_${qty}`)],
+          [Markup.button.callback('❌ Batal', 'cancel_buy')],
+        ]),
+      }
+    ).catch(() => {});
   });
 
   // ── Bayar via Saldo ───────────────────────────────────────
@@ -313,7 +323,6 @@ module.exports = function registerHandlers(bot, tenant) {
       if (parseInt(sc.cnt) < qty)
         return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt} akun.`).catch(() => {});
 
-      // Cek pesanan pending
       const { rows: [existing] } = await pool.query(
         `SELECT id, payment_url FROM orders
          WHERE user_id=$1 AND product_id=$2 AND status='pending' AND tenant_id=$3
@@ -556,7 +565,6 @@ module.exports = function registerHandlers(bot, tenant) {
   // HELPER FUNCTIONS
   // ─────────────────────────────────────────────────────────
 
-  // Daftar Produk — nama + stok
   async function showProductList(ctx, page) {
     try {
       const { rows: allProducts } = await pool.query(
@@ -583,17 +591,10 @@ module.exports = function registerHandlers(bot, tenant) {
       userProductMap[key] = { _page: safePage };
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
 
-      const listText = pageItems.map((p, i) => {
-        const stock = parseInt(p.stock_count);
-        const icon  = stock > 0 ? '✅' : '❌';
-        return `${icon} [${start + i + 1}] ${p.name} (${stock})`;
-      }).join('\n');
-
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
       for (let i = 0; i < numKeys.length; i += 6)
         keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
-
       const navRow = [];
       if (safePage > 1)          navRow.push(Markup.button.text('◀️ Sebelumnya'));
       if (safePage < totalPages) navRow.push(Markup.button.text('Selanjutnya ▶️'));
@@ -607,23 +608,40 @@ module.exports = function registerHandlers(bot, tenant) {
         return `┊ ${icon} [${start + i + 1}] ${p.name} (${stock})`;
       }).join('\n');
 
-      await ctx.reply(
+      const text =
         `╭ - - - - - - - - - - - - - - - - ╮\n` +
         `┊  LIST PRODUK\n` +
         `┊  page ${safePage} / ${totalPages}\n` +
         `${divider}\n` +
         `${lines}\n` +
         `╰ - - - - - - - - - - - - - - - - ╯\n\n` +
-        `_Ketik nomor untuk melihat detail._`,
-        { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
- );
+        `_Ketik nomor untuk melihat detail._`;
+
+      // Ambil banner dari database
+      const { rows: [tenantData] } = await pool.query(
+        `SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]
+      );
+
+      if (tenantData?.banner_file_id) {
+        try {
+          await ctx.replyWithPhoto(tenantData.banner_file_id, {
+            caption   : text,
+            parse_mode: 'Markdown',
+            ...Markup.keyboard(keyRows).resize(),
+          });
+        } catch {
+          await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
+        }
+      } else {
+        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
+      }
+
     } catch (err) {
       console.error('showProductList error:', err);
       ctx.reply('Gagal memuat produk.');
     }
   }
 
-  // Detail Produk — qty picker + beli sekarang
   async function showProductDetail(ctx, productId, qty = 1) {
     try {
       const { rows: [product] } = await pool.query(
