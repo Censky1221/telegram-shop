@@ -9,6 +9,7 @@ const navItems = [
   { href: '/dashboard/orders',    label: '📋 Orders' },
   { href: '/dashboard/users',     label: '👤 Users & Saldo' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
+  { href: '/dashboard/variants', label: '🎛️ Varian' },
 ];
 
 export default function DashboardLayout({ children }) {

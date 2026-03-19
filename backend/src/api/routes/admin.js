@@ -3,6 +3,8 @@ const bcrypt  = require('bcrypt');
 const jwt     = require('jsonwebtoken');
 const router  = express.Router();
 const { pool } = require('../../db/pool');
+const variantsRouter = require('./variants');
+router.use('/admin', authMiddleware, variantsRouter);
 
 // ── Auth Middleware ───────────────────────────────────────────────
 function authMiddleware(req, res, next) {

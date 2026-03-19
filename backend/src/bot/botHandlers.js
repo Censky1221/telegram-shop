@@ -1,10 +1,11 @@
 const { Markup } = require('telegraf');
 const axios      = require('axios');
 const { pool }   = require('../db/pool');
-const QRCode     = require('qrcode'); // ← Dipindahkan ke atas agar Railway bisa load dengan benar
+const QRCode     = require('qrcode');
 
 const PAGE_SIZE      = 9;
 const userProductMap = {};
+const userVariantMap = {};
 const userCart       = {};
 const PAKASIR_URL    = 'https://app.pakasir.com/api';
 
@@ -37,7 +38,7 @@ module.exports = function registerHandlers(bot, tenant) {
         parse_mode: 'Markdown',
         ...Markup.keyboard([
           ['🛍 Daftar Produk', '💰 Saldo Saya'],
-          ['📦 Pesanan Saya', '📞 Bantuan'],
+          ['📦 Pesanan Saya',  '📞 Bantuan'],
         ]).resize(),
       }
     );
@@ -55,7 +56,7 @@ module.exports = function registerHandlers(bot, tenant) {
         `💰 *Saldo Kamu*\n\nRp *${Number(saldo).toLocaleString('id-ID')}*\n\n_(Hubungi admin untuk top-up)_`,
         { parse_mode: 'Markdown' }
       );
-    } catch (err) {
+    } catch {
       ctx.reply('Gagal mengambil saldo.');
     }
   });
@@ -75,14 +76,6 @@ module.exports = function registerHandlers(bot, tenant) {
   // ── Daftar Produk ─────────────────────────────────────────
   bot.hears('🛍 Daftar Produk', (ctx) => showProductList(ctx, 1));
 
-  bot.hears(/^(\d+)$/, async (ctx) => {
-    const num    = ctx.message.text;
-    const userId = ctx.from.id;
-    const map    = userProductMap[`${tenantId}_${userId}`];
-    if (!map || !map[num]) return;
-    await showProductDetail(ctx, map[num], 1);
-  });
-
   bot.hears('Selanjutnya ▶️', async (ctx) => {
     const key  = `${tenantId}_${ctx.from.id}`;
     const page = (userProductMap[key]?._page || 1) + 1;
@@ -98,78 +91,100 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.hears('🏠 Menu', async (ctx) => {
     await ctx.reply('Pilih menu:', Markup.keyboard([
       ['🛍 Daftar Produk', '💰 Saldo Saya'],
-      ['📦 Pesanan Saya', '📞 Bantuan'],
+      ['📦 Pesanan Saya',  '📞 Bantuan'],
     ]).resize());
+  });
+
+  // ── User ketik nomor ──────────────────────────────────────
+  bot.hears(/^(\d+)$/, async (ctx) => {
+    const num        = ctx.message.text;
+    const userId     = ctx.from.id;
+    const variantKey = `${tenantId}_${userId}_variants`;
+    const productKey = `${tenantId}_${userId}`;
+
+    // Cek apakah sedang di menu varian
+    if (userVariantMap[variantKey]?.[num]) {
+      await showVariantDetail(ctx, userVariantMap[variantKey][num], 1);
+      return;
+    }
+
+    // Cek apakah sedang di menu produk
+    if (userProductMap[productKey]?.[num]) {
+      await showVariantList(ctx, userProductMap[productKey][num]);
+      return;
+    }
   });
 
   // ── Quantity +/- ──────────────────────────────────────────
   bot.action(/^qty_(plus|minus)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const dir       = ctx.match[1];
-    const productId = parseInt(ctx.match[2]);
+    const variantId = parseInt(ctx.match[2]);
     const cartKey   = `${tenantId}_${ctx.from.id}`;
 
-    if (!userCart[cartKey] || userCart[cartKey].productId !== productId) {
-      userCart[cartKey] = { productId, qty: 1 };
+    if (!userCart[cartKey] || userCart[cartKey].variantId !== variantId) {
+      userCart[cartKey] = { variantId, qty: 1 };
     }
     const cart = userCart[cartKey];
 
-    const { rows: [p] } = await pool.query(
+    const { rows: [v] } = await pool.query(
       `SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-       FROM products p LEFT JOIN stocks s ON s.product_id=p.id
-       WHERE p.id=$1 AND p.tenant_id=$2 GROUP BY p.id`,
-      [productId, tenantId]
+       FROM product_variants pv
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.id=$1 AND pv.tenant_id=$2
+       GROUP BY pv.id`,
+      [variantId, tenantId]
     );
-    const maxStock = parseInt(p?.stock_count || 0);
+    const maxStock = parseInt(v?.stock_count || 0);
 
     if (dir === 'plus'  && cart.qty < maxStock) cart.qty++;
     if (dir === 'minus' && cart.qty > 1)        cart.qty--;
 
     try {
       await ctx.editMessageReplyMarkup(
-        buildDetailKeyboard(productId, cart.qty, maxStock > 0).reply_markup
+        buildVariantKeyboard(variantId, cart.qty, maxStock > 0).reply_markup
       );
     } catch {}
   });
 
   // ── Beli Sekarang ─────────────────────────────────────────
-  bot.action(/^buy_(\d+)$/, async (ctx) => {
+  bot.action(/^buy_v_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const productId = parseInt(ctx.match[1]);
+    const variantId = parseInt(ctx.match[1]);
     const cartKey   = `${tenantId}_${ctx.from.id}`;
     const qty       = userCart[cartKey]?.qty || 1;
 
-    const { rows: [product] } = await pool.query(
-      'SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true',
-      [productId, tenantId]
+    const { rows: [variant] } = await pool.query(
+      `SELECT pv.*, p.name AS product_name
+       FROM product_variants pv
+       JOIN products p ON p.id = pv.product_id
+       WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
+      [variantId, tenantId]
     );
-    if (!product) return ctx.answerCbQuery('Produk tidak ditemukan.', { show_alert: true });
+    if (!variant) return ctx.answerCbQuery('Varian tidak ditemukan.', { show_alert: true });
 
-    const total = product.price * qty;
+    const total = variant.price * qty;
 
-    const newText =
+    const text =
       `💳 *Pilih Metode Pembayaran*\n\n` +
-      `📦 ${product.name} x${qty}\n` +
+      `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
       `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
       `Pilih metode bayar:`;
 
-    const keyboard = Markup.inlineKeyboard([
-      [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_${productId}_${qty}`)],
-      [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_${productId}_${qty}`)],
-      [Markup.button.callback('❌ Batal', 'cancel_buy')],
-    ]);
-
-    try {
-      await ctx.editMessageCaption(newText, { parse_mode: 'Markdown', ...keyboard });
-    } catch {
-      await ctx.editMessageText(newText, { parse_mode: 'Markdown', ...keyboard }).catch(() => {});
-    }
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_v_${variantId}_${qty}`)],
+        [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_v_${variantId}_${qty}`)],
+        [Markup.button.callback('❌ Batal', 'cancel_buy')],
+      ]),
+    }).catch(() => {});
   });
 
   // ── Bayar via Saldo ───────────────────────────────────────
-  bot.action(/^pay_saldo_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^pay_saldo_v_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const productId  = parseInt(ctx.match[1]);
+    const variantId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -180,13 +195,16 @@ module.exports = function registerHandlers(bot, tenant) {
       );
       if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
 
-      const { rows: [product] } = await pool.query(
-        'SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true',
-        [productId, tenantId]
+      const { rows: [variant] } = await pool.query(
+        `SELECT pv.*, p.name AS product_name
+         FROM product_variants pv
+         JOIN products p ON p.id = pv.product_id
+         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
+        [variantId, tenantId]
       );
-      if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
+      if (!variant) return ctx.editMessageText('Varian tidak ditemukan.').catch(() => {});
 
-      const total = product.price * qty;
+      const total = variant.price * qty;
 
       if ((user.balance || 0) < total) {
         return ctx.editMessageText(
@@ -199,36 +217,36 @@ module.exports = function registerHandlers(bot, tenant) {
       }
 
       const { rows: [sc] } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
-        [productId, tenantId]
+        `SELECT COUNT(*) AS cnt FROM stocks WHERE variant_id=$1 AND tenant_id=$2 AND status='available'`,
+        [variantId, tenantId]
       );
       if (parseInt(sc.cnt) < qty)
         return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt} akun.`).catch(() => {});
 
       await ctx.editMessageText(
         `✅ *Konfirmasi Pembelian*\n\n` +
-        `📦 ${product.name} x${qty}\n` +
+        `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
         `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
         `💳 Saldo setelah bayar: *Rp ${Number((user.balance || 0) - total).toLocaleString('id-ID')}*\n\n` +
         `Lanjutkan?`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_${productId}_${qty}`)],
+            [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_v_${variantId}_${qty}`)],
             [Markup.button.callback('❌ Batal', 'cancel_buy')],
           ]),
         }
-      );
+      ).catch(() => {});
     } catch (err) {
-      console.error('pay_saldo error:', err);
+      console.error('pay_saldo_v error:', err);
       ctx.editMessageText('Terjadi kesalahan. Coba lagi.').catch(() => {});
     }
   });
 
   // ── Konfirmasi Saldo ──────────────────────────────────────
-  bot.action(/^confirm_saldo_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^confirm_saldo_v_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery('Memproses...'); } catch {}
-    const productId  = parseInt(ctx.match[1]);
+    const variantId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -242,33 +260,32 @@ module.exports = function registerHandlers(bot, tenant) {
         'SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE',
         [telegramId, tenantId]
       );
-      const { rows: [product] } = await client.query(
-        'SELECT * FROM products WHERE id=$1 AND tenant_id=$2',
-        [productId, tenantId]
+      const { rows: [variant] } = await client.query(
+        `SELECT pv.*, p.name AS product_name, p.id AS pid
+         FROM product_variants pv JOIN products p ON p.id=pv.product_id
+         WHERE pv.id=$1 AND pv.tenant_id=$2`,
+        [variantId, tenantId]
       );
 
-      const total = product.price * qty;
+      const total = variant.price * qty;
       if ((user.balance || 0) < total) {
         await client.query('ROLLBACK');
         return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {});
       }
 
-      await client.query(
-        'UPDATE users SET balance = balance - $1 WHERE id=$2',
-        [total, user.id]
-      );
+      await client.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [total, user.id]);
 
       const { rows: [order] } = await client.query(
-        `INSERT INTO orders (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id)
-         VALUES ($1,$2,$3,$4,'paid',$5,NOW(),$6) RETURNING *`,
-        [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]
+        `INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id)
+         VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`,
+        [user.id, variant.pid, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]
       );
 
       await client.query('COMMIT');
 
       await ctx.editMessageText(
         `✅ *Pembayaran Berhasil!*\n\n` +
-        `📦 ${product.name} x${qty}\n` +
+        `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
         `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
         `📨 Akun sedang dikirim ke chat ini...`,
         { parse_mode: 'Markdown' }
@@ -281,7 +298,7 @@ module.exports = function registerHandlers(bot, tenant) {
 
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('confirm_saldo error:', err);
+      console.error('confirm_saldo_v error:', err);
       ctx.editMessageText('❌ Terjadi kesalahan. Hubungi admin.').catch(() => {});
     } finally {
       client.release();
@@ -289,9 +306,9 @@ module.exports = function registerHandlers(bot, tenant) {
   });
 
   // ── Bayar via QRIS ────────────────────────────────────────
-  bot.action(/^pay_qris_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^pay_qris_v_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const productId  = parseInt(ctx.match[1]);
+    const variantId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -302,74 +319,61 @@ module.exports = function registerHandlers(bot, tenant) {
       );
       if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
 
-      const { rows: [product] } = await pool.query(
-        'SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true',
-        [productId, tenantId]
+      const { rows: [variant] } = await pool.query(
+        `SELECT pv.*, p.name AS product_name, p.id AS pid
+         FROM product_variants pv JOIN products p ON p.id=pv.product_id
+         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
+        [variantId, tenantId]
       );
-      if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
+      if (!variant) return ctx.editMessageText('Varian tidak ditemukan.').catch(() => {});
 
       const { rows: [sc] } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
-        [productId, tenantId]
+        `SELECT COUNT(*) AS cnt FROM stocks WHERE variant_id=$1 AND tenant_id=$2 AND status='available'`,
+        [variantId, tenantId]
       );
       if (parseInt(sc.cnt) < qty)
         return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt} akun.`).catch(() => {});
 
+      // Cek pesanan pending
       const { rows: [existing] } = await pool.query(
         `SELECT id, payment_url FROM orders
-         WHERE user_id=$1 AND product_id=$2 AND status='pending' AND tenant_id=$3
+         WHERE user_id=$1 AND variant_id=$2 AND status='pending' AND tenant_id=$3
            AND created_at > NOW() - INTERVAL '2 hours'`,
-        [user.id, productId, tenantId]
+        [user.id, variantId, tenantId]
       );
       if (existing) {
         const isQrisString = existing.payment_url && !existing.payment_url.startsWith('http');
         if (isQrisString) {
-          // Ada pesanan pending dengan QRIS string — kirim ulang sebagai gambar
           try {
-            const qrBuffer = await QRCode.toBuffer(existing.payment_url, {
-              type  : 'png',
-              width : 512,
-              margin: 2,
-              color : { dark: '#000000', light: '#ffffff' },
-            });
+            const qrBuffer = await QRCode.toBuffer(existing.payment_url, { type: 'png', width: 512, margin: 2 });
             await ctx.deleteMessage().catch(() => {});
-            await ctx.replyWithPhoto(
-              { source: qrBuffer },
-              {
-                caption: `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\nScan QR di atas untuk melanjutkan pembayaran.`,
-                parse_mode: 'Markdown',
-                ...Markup.inlineKeyboard([
-                  [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
-                  [Markup.button.callback('❌ Batal', 'cancel_buy')],
-                ])
-              }
-            );
+            await ctx.replyWithPhoto({ source: qrBuffer }, {
+              caption: `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\nScan QR untuk melanjutkan pembayaran.`,
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
+                [Markup.button.callback('❌ Batal', 'cancel_buy')],
+              ])
+            });
           } catch {
             return ctx.editMessageText(
-              `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\n` +
-              `📲 Kode QRIS:\n\`${existing.payment_url}\``,
+              `⚠️ Pesanan pending.\n\n\`${existing.payment_url}\``,
               {
                 parse_mode: 'Markdown',
                 ...Markup.inlineKeyboard([
-                  [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
+                  [Markup.button.callback('✅ Sudah Bayar', `check_pakasir_${existing.id}`)],
                   [Markup.button.callback('❌ Batal', 'cancel_buy')],
                 ])
               }
             ).catch(() => {});
           }
           return;
-        } else {
-          return ctx.editMessageText(
-            '⚠️ Kamu masih punya pesanan yang belum dibayar.',
-            Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', existing.payment_url)]])
-          ).catch(() => {});
         }
       }
 
-      const total          = product.price * qty;
+      const total          = variant.price * qty;
       const paymentOrderId = `ORDER-${Date.now()}-${user.id}`;
 
-      // Ambil config gateway dari tenant
       const { rows: [tenantConfig] } = await pool.query(
         `SELECT tripay_api_key, tripay_private_key, tripay_merchant_code, tripay_mode,
                 pakasir_api_key, pakasir_project_slug, payment_gateway
@@ -379,45 +383,28 @@ module.exports = function registerHandlers(bot, tenant) {
 
       const gateway = tenantConfig?.payment_gateway || 'tripay';
 
-      if (gateway === 'pakasir' && !tenantConfig?.pakasir_api_key) {
-        return ctx.editMessageText('❌ Pakasir belum dikonfigurasi. Hubungi admin toko.').catch(() => {});
-      }
-      if (gateway === 'tripay' && !tenantConfig?.tripay_api_key) {
-        return ctx.editMessageText('❌ Payment gateway belum dikonfigurasi. Hubungi admin toko.').catch(() => {});
-      }
+      if (gateway === 'pakasir' && !tenantConfig?.pakasir_api_key)
+        return ctx.editMessageText('❌ Pakasir belum dikonfigurasi.').catch(() => {});
+      if (gateway === 'tripay' && !tenantConfig?.tripay_api_key)
+        return ctx.editMessageText('❌ Payment gateway belum dikonfigurasi.').catch(() => {});
 
       const { createPayment } = require('../services/paymentService');
-
-      let config;
-      if (gateway === 'pakasir') {
-        config = {
-          gateway      : 'pakasir',
-          api_key      : tenantConfig.pakasir_api_key,
-          project_slug : tenantConfig.pakasir_project_slug,
-        };
-      } else {
-        config = {
-          gateway      : 'tripay',
-          api_key      : tenantConfig.tripay_api_key,
-          private_key  : tenantConfig.tripay_private_key,
-          merchant_code: tenantConfig.tripay_merchant_code,
-          mode         : tenantConfig.tripay_mode || 'sandbox',
-        };
-      }
+      const config = gateway === 'pakasir'
+        ? { gateway: 'pakasir', api_key: tenantConfig.pakasir_api_key, project_slug: tenantConfig.pakasir_project_slug }
+        : { gateway: 'tripay', api_key: tenantConfig.tripay_api_key, private_key: tenantConfig.tripay_private_key, merchant_code: tenantConfig.tripay_merchant_code, mode: tenantConfig.tripay_mode || 'sandbox' };
 
       const result = await createPayment(config, {
         orderId     : paymentOrderId,
         amount      : total,
-        productName : `${product.name} x${qty}`,
+        productName : `${variant.product_name} - ${variant.name} x${qty}`,
         customerName: ctx.from.first_name || 'Customer',
       });
 
       if (gateway === 'pakasir') {
-        // Simpan payment_number (string QRIS) ke kolom payment_url
         const { rows: [newOrder] } = await pool.query(
-          `INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id)
-           VALUES ($1,$2,$3,$4,$5,'pending',$6,$7) RETURNING id`,
-          [user.id, productId, paymentOrderId, result.payment_number, total, qty, tenantId]
+          `INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING id`,
+          [user.id, variant.pid, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]
         );
 
         const expiredText = result.expired_at
@@ -426,7 +413,7 @@ module.exports = function registerHandlers(bot, tenant) {
 
         const caption =
           `🧾 *Pesanan Dibuat!*\n\n` +
-          `📦 ${product.name} x${qty}\n` +
+          `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
           `💰 Total: *Rp ${Number(result.total_payment || total).toLocaleString('id-ID')}*\n` +
           expiredText + `\n\n` +
           `📲 *Cara Bayar QRIS:*\n` +
@@ -440,63 +427,33 @@ module.exports = function registerHandlers(bot, tenant) {
           [Markup.button.callback('❌ Batal', 'cancel_buy')],
         ]);
 
-        // ── Generate & kirim gambar QR ─────────────────────
         try {
-          const qrBuffer = await QRCode.toBuffer(result.payment_number, {
-            type  : 'png',
-            width : 512,
-            margin: 2,
-            color : { dark: '#000000', light: '#ffffff' },
-          });
-
-          // Hapus pesan lama
+          const qrBuffer = await QRCode.toBuffer(result.payment_number, { type: 'png', width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
           await ctx.deleteMessage().catch(() => {});
-
-          // Kirim sebagai foto — gunakan Buffer langsung (kompatibel Railway)
-          const sentMsg = await ctx.replyWithPhoto(
-            { source: qrBuffer },
-            { caption, parse_mode: 'Markdown', ...keyboard }
-          );
-
-          // Simpan chat_id & message_id agar bisa dihapus saat produk dikirim
+          const sentMsg = await ctx.replyWithPhoto({ source: qrBuffer }, { caption, parse_mode: 'Markdown', ...keyboard });
           if (sentMsg?.message_id) {
-            await pool.query(
-              `UPDATE orders SET chat_id=$1, message_id=$2 WHERE id=$3`,
-              [sentMsg.chat.id, sentMsg.message_id, newOrder.id]
-            );
+            await pool.query(`UPDATE orders SET chat_id=$1, message_id=$2 WHERE id=$3`, [sentMsg.chat.id, sentMsg.message_id, newOrder.id]);
           }
-
         } catch (qrErr) {
-          // Log full error agar mudah debug di Railway logs
-          console.error('QR generate error (full):', qrErr);
-
-          // Fallback: kirim teks kode QRIS
+          console.error('QR generate error:', qrErr);
           await ctx.deleteMessage().catch(() => {});
-          await ctx.reply(
-            caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``,
-            { parse_mode: 'Markdown', ...keyboard }
-          ).catch(() => {});
+          await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard }).catch(() => {});
         }
 
       } else {
-        // Tripay — pakai checkout URL
         await pool.query(
-          `INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id)
-           VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`,
-          [user.id, productId, paymentOrderId, result.payment_url, total, qty, tenantId]
+          `INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`,
+          [user.id, variant.pid, variantId, paymentOrderId, result.payment_url, total, qty, tenantId]
         );
-
         await ctx.editMessageText(
-          `🧾 *Pesanan Dibuat!*\n\n` +
-          `📦 ${product.name} x${qty}\n` +
-          `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
-          `Klik tombol di bawah untuk membayar.\n⏰ Link berlaku *2 jam*.`,
+          `🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *2 jam*.`,
           { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }
         ).catch(() => {});
       }
 
     } catch (err) {
-      console.error('pay_qris error:', err);
+      console.error('pay_qris_v error:', err);
       ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {});
     }
   });
@@ -505,14 +462,12 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.action(/^copy_qris_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const orderId = parseInt(ctx.match[1]);
-
     try {
       const { rows: [order] } = await pool.query(
         `SELECT payment_url FROM orders WHERE id=$1 AND tenant_id=$2`,
         [orderId, tenantId]
       );
       if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
-
       await ctx.reply(
         `📋 *Kode QRIS:*\n\n\`${order.payment_url}\`\n\n_Paste kode ini di e-wallet kamu._`,
         { parse_mode: 'Markdown' }
@@ -534,20 +489,14 @@ module.exports = function registerHandlers(bot, tenant) {
          WHERE o.id=$1 AND o.tenant_id=$2`,
         [orderId, tenantId]
       );
-
       if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
+      if (order.status === 'paid') return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
 
-      if (order.status === 'paid') {
-        return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
-      }
-
-      // Ambil config Pakasir
       const { rows: [tenantConfig] } = await pool.query(
         `SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`,
         [tenantId]
       );
 
-      // Cek status transaksi ke Pakasir — coba beberapa kemungkinan endpoint
       let checkResp;
       const endpoints = [
         `${PAKASIR_URL}/transactionstatus`,
@@ -555,62 +504,31 @@ module.exports = function registerHandlers(bot, tenant) {
         `${PAKASIR_URL}/transaction/status`,
         `${PAKASIR_URL}/transactioncheck`,
       ];
-      const checkPayload = {
-        project : tenantConfig.pakasir_project_slug,
-        order_id: order.payment_id,
-        api_key : tenantConfig.pakasir_api_key,
-      };
-
       for (const endpoint of endpoints) {
         try {
-          console.log('Trying endpoint:', endpoint);
-          checkResp = await axios.post(endpoint, checkPayload,
-            { headers: { 'Content-Type': 'application/json' } }
-          );
-          console.log('Pakasir check response from', endpoint, ':', JSON.stringify(checkResp.data));
+          checkResp = await axios.post(endpoint, {
+            project : tenantConfig.pakasir_project_slug,
+            order_id: order.payment_id,
+            api_key : tenantConfig.pakasir_api_key,
+          }, { headers: { 'Content-Type': 'application/json' } });
           break;
-        } catch (e) {
-          console.log(`Endpoint ${endpoint} failed:`, e.response?.status, e.response?.data || e.message);
-          checkResp = null;
-        }
+        } catch { checkResp = null; }
       }
 
-      if (!checkResp) {
-        return ctx.answerCbQuery(
-          '❌ Tidak dapat cek status. Share screenshot docs Pakasir bagian "cek transaksi" ke developer.',
-          { show_alert: true }
-        );
-      }
+      if (!checkResp) return ctx.answerCbQuery('❌ Tidak dapat cek status pembayaran.', { show_alert: true });
 
       const paymentData = checkResp.data?.payment || checkResp.data;
-      const isPaid =
-        paymentData?.status === 'paid' ||
-        paymentData?.payment_status === 'paid' ||
-        paymentData?.is_paid === true ||
-        paymentData?.paid === true;
+      const isPaid = paymentData?.status === 'paid' || paymentData?.payment_status === 'paid' || paymentData?.is_paid === true || paymentData?.paid === true;
 
-      if (!isPaid) {
-        return ctx.answerCbQuery(
-          '❌ Pembayaran belum diterima. Pastikan sudah bayar lalu coba lagi.',
-          { show_alert: true }
-        );
-      }
+      if (!isPaid) return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi.', { show_alert: true });
 
-      // Tandai lunas
-      await pool.query(
-        `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1 AND tenant_id=$2`,
-        [orderId, tenantId]
-      );
+      await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1 AND tenant_id=$2`, [orderId, tenantId]);
 
       await ctx.editMessageCaption(
-        `✅ *Pembayaran Diterima!*\n\n` +
-        `📨 Akun sedang dikirim ke chat ini...`,
+        `✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim ke chat ini...`,
         { parse_mode: 'Markdown' }
       ).catch(() =>
-        ctx.editMessageText(
-          `✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim ke chat ini...`,
-          { parse_mode: 'Markdown' }
-        ).catch(() => {})
+        ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {})
       );
 
       const { assignStockAndDeliver } = require('../services/stockService');
@@ -619,20 +537,14 @@ module.exports = function registerHandlers(bot, tenant) {
       }
 
     } catch (err) {
-      console.error('check_pakasir error:', err.message);
-      console.error('check_pakasir full error:', err.response?.data || err);
-      ctx.answerCbQuery(
-        `Gagal cek pembayaran: ${err.message}`,
-        { show_alert: true }
-      );
+      console.error('check_pakasir error:', err);
+      ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true });
     }
   });
 
-  // ── Cancel & Back ─────────────────────────────────────────
+  // ── Cancel ────────────────────────────────────────────────
   bot.action('cancel_buy', async (ctx) => {
     try { await ctx.answerCbQuery('Dibatalkan'); } catch {}
-
-    // Hapus pesanan pending dari database
     try {
       const telegramId = ctx.from.id.toString();
       const { rows: [user] } = await pool.query(
@@ -646,9 +558,8 @@ module.exports = function registerHandlers(bot, tenant) {
         );
       }
     } catch (err) {
-      console.error('cancel_buy delete error:', err.message);
+      console.error('cancel_buy error:', err.message);
     }
-
     await ctx.deleteMessage().catch(() => {});
   });
 
@@ -659,38 +570,39 @@ module.exports = function registerHandlers(bot, tenant) {
     await showProductList(ctx, page);
   });
 
-  bot.action('no_stock',  (ctx) => ctx.answerCbQuery('Stok sedang habis.', { show_alert: true }));
-  bot.action('qty_noop',  (ctx) => { try { ctx.answerCbQuery(); } catch {} });
+  bot.action(/^back_to_variants_(\d+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const variantId = parseInt(ctx.match[1]);
+    // Ambil product_id dari variant
+    try {
+      const { rows: [v] } = await pool.query(
+        `SELECT product_id FROM product_variants WHERE id=$1 AND tenant_id=$2`,
+        [variantId, tenantId]
+      );
+      if (v) await showVariantList(ctx, v.product_id);
+    } catch {}
+  });
 
-  // ── Helper functions ──────────────────────────────────────
-  function buildDetailKeyboard(productId, qty, inStock) {
-    return Markup.inlineKeyboard([
-      [
-        Markup.button.callback('➖', `qty_minus_${productId}`),
-        Markup.button.callback(`  ${qty}  `, 'qty_noop'),
-        Markup.button.callback('➕', `qty_plus_${productId}`),
-      ],
-      inStock
-        ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x' + qty + ')' : ''} Sekarang`, `buy_${productId}`)]
-        : [Markup.button.callback('❌ Stok Habis', 'no_stock')],
-      [Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')],
-    ]);
-  }
+  bot.action('no_stock', (ctx) => ctx.answerCbQuery('Stok sedang habis.', { show_alert: true }));
+  bot.action('qty_noop', (ctx) => { try { ctx.answerCbQuery(); } catch {} });
 
+  // ─────────────────────────────────────────────────────────
+  // HELPER FUNCTIONS
+  // ─────────────────────────────────────────────────────────
+
+  // Daftar Produk — hanya nama, tanpa stok
   async function showProductList(ctx, page) {
     try {
       const { rows: allProducts } = await pool.query(
-        `SELECT p.id, p.name,
-                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+        `SELECT p.id, p.name
          FROM products p
-         LEFT JOIN stocks s ON s.product_id=p.id
-         WHERE p.is_active=true AND p.tenant_id=$1 GROUP BY p.id ORDER BY p.id`,
+         WHERE p.is_active=true AND p.tenant_id=$1
+         ORDER BY p.id`,
         [tenantId]
       );
 
       if (!allProducts.length) {
-        return ctx.reply('Tidak ada produk tersedia saat ini.',
-          Markup.keyboard([['🏠 Menu']]).resize());
+        return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
       }
 
       const totalPages = Math.ceil(allProducts.length / PAGE_SIZE);
@@ -700,15 +612,9 @@ module.exports = function registerHandlers(bot, tenant) {
 
       const key = `${tenantId}_${ctx.from.id}`;
       userProductMap[key] = { _page: safePage };
-      pageItems.forEach((p, i) => {
-        userProductMap[key][String(start + i + 1)] = p.id;
-      });
+      pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
 
-      const listText = pageItems.map((p, i) => {
-        const num   = start + i + 1;
-        const stock = parseInt(p.stock_count);
-        return `${num}. ${p.name} — ${stock > 0 ? `✅ Stok ${stock}` : '❌ Habis'}`;
-      }).join('\n');
+      const listText = pageItems.map((p, i) => `${start + i + 1}. ${p.name}`).join('\n');
 
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
@@ -721,46 +627,119 @@ module.exports = function registerHandlers(bot, tenant) {
       navRow.push(Markup.button.text('🏠 Menu'));
       keyRows.push(navRow);
 
-      const caption =
+      await ctx.reply(
         `🛍 *Daftar Produk*\n\n${listText}\n\n` +
         `📄 Halaman ${safePage}/${totalPages}\n` +
-        `Masukkan nomor untuk melihat detail.`;
-
-      await ctx.reply(caption, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
+        `Masukkan nomor untuk melihat pilihan.`,
+        { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
+      );
     } catch (err) {
       console.error('showProductList error:', err);
       ctx.reply('Gagal memuat produk.');
     }
   }
 
-  async function showProductDetail(ctx, productId, qty = 1) {
+  // Daftar Varian — tampil nama + harga + stok
+  async function showVariantList(ctx, productId) {
     try {
       const { rows: [product] } = await pool.query(
-        `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM products p LEFT JOIN stocks s ON s.product_id=p.id
-         WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true GROUP BY p.id`,
+        `SELECT id, name FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
         [productId, tenantId]
       );
       if (!product) return ctx.reply('Produk tidak ditemukan.');
 
-      const stock   = parseInt(product.stock_count);
+      const { rows: variants } = await pool.query(
+        `SELECT pv.id, pv.name, pv.price,
+                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+         FROM product_variants pv
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         WHERE pv.product_id=$1 AND pv.tenant_id=$2 AND pv.is_active=true
+         GROUP BY pv.id
+         ORDER BY pv.id`,
+        [productId, tenantId]
+      );
+
+      if (!variants.length) {
+        return ctx.reply(
+          `📦 *${product.name}*\n\nBelum ada varian tersedia.`,
+          { parse_mode: 'Markdown', ...Markup.keyboard([['🏠 Menu']]).resize() }
+        );
+      }
+
+      const variantKey = `${tenantId}_${ctx.from.id}_variants`;
+      userVariantMap[variantKey] = {};
+      variants.forEach((v, i) => { userVariantMap[variantKey][String(i + 1)] = v.id; });
+
+      const listText = variants.map((v, i) => {
+        const stock   = parseInt(v.stock_count);
+        const harga   = `Rp ${Number(v.price).toLocaleString('id-ID')}`;
+        const stokInfo = stock > 0 ? `✅ Stok ${stock}` : '❌ Habis';
+        return `${i + 1}. ${v.name} — ${harga} | ${stokInfo}`;
+      }).join('\n');
+
+      const keyRows = [];
+      const numKeys = variants.map((_, i) => String(i + 1));
+      for (let i = 0; i < numKeys.length; i += 6)
+        keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
+      keyRows.push([Markup.button.text('🏠 Menu')]);
+
+      await ctx.reply(
+        `📦 *${product.name}*\n\n${listText}\n\nMasukkan nomor untuk memilih varian.`,
+        { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
+      );
+    } catch (err) {
+      console.error('showVariantList error:', err);
+      ctx.reply('Gagal memuat varian.');
+    }
+  }
+
+  // Detail Varian — qty picker + beli sekarang
+  async function showVariantDetail(ctx, variantId, qty = 1) {
+    try {
+      const { rows: [variant] } = await pool.query(
+        `SELECT pv.*, p.name AS product_name,
+                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+         FROM product_variants pv
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         JOIN products p ON p.id = pv.product_id
+         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true
+         GROUP BY pv.id, p.name`,
+        [variantId, tenantId]
+      );
+      if (!variant) return ctx.reply('Varian tidak ditemukan.');
+
+      const stock   = parseInt(variant.stock_count);
       const inStock = stock > 0;
       const cartKey = `${tenantId}_${ctx.from.id}`;
-      userCart[cartKey] = { productId, qty };
+      userCart[cartKey] = { variantId, qty };
 
       const text =
-        `🏷 *${product.name}*\n\n` +
-        `📝 ${product.description || 'Tidak ada deskripsi.'}\n\n` +
+        `🏷 *${variant.product_name} - ${variant.name}*\n\n` +
+        `📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n` +
+        `💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n` +
         `📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n\n` +
         `Atur jumlah lalu tekan *Beli Sekarang*`;
 
-      await ctx.reply(text, { parse_mode: 'Markdown', ...buildDetailKeyboard(productId, qty, inStock) });
+      await ctx.reply(text, { parse_mode: 'Markdown', ...buildVariantKeyboard(variantId, qty, inStock) });
     } catch (err) {
-      console.error('showProductDetail error:', err);
-      ctx.reply('Gagal memuat detail produk.');
+      console.error('showVariantDetail error:', err);
+      ctx.reply('Gagal memuat detail varian.');
     }
+  }
+
+  function buildVariantKeyboard(variantId, qty, inStock) {
+    return Markup.inlineKeyboard([
+      [
+        Markup.button.callback('➖', `qty_minus_${variantId}`),
+        Markup.button.callback(`  ${qty}  `, 'qty_noop'),
+        Markup.button.callback('➕', `qty_plus_${variantId}`),
+      ],
+      inStock
+        ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x' + qty + ')' : ''} Sekarang`, `buy_v_${variantId}`)]
+        : [Markup.button.callback('❌ Stok Habis', 'no_stock')],
+      [Markup.button.callback('◀️ Kembali ke Pilihan', `back_to_variants_${variantId}`)],
+    ]);
   }
 };
