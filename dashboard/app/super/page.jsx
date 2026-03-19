@@ -39,7 +39,7 @@ export default function SuperDashboard() {
   async function fetchTenants() {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/tenant`, { headers: authHeaders() });
+      const res = await fetch(`${API}/api/tenant`, { headers: authHeaders() });
       if (res.status === 401) { router.push('/super/login'); return; }
       setTenants(await res.json());
     } catch { setError('Gagal memuat data'); }
@@ -51,7 +51,7 @@ export default function SuperDashboard() {
     setError(''); setSuccess('');
     setSaving(true);
     try {
-      const url    = editTenant ? `${API}/tenant/${editTenant.id}` : `${API}/tenant`;
+      const url    = editTenant ? `${API}/api/tenant/${editTenant.id}` : `${API}/api/tenant`;
       const method = editTenant ? 'PUT' : 'POST';
       const res    = await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(form) });
       const data   = await res.json();
@@ -59,7 +59,7 @@ export default function SuperDashboard() {
       const tenantId = editTenant ? editTenant.id : data.id;
 
       if (!editTenant && form.admin_email && form.admin_password) {
-        const adminRes = await fetch(`${API}/admin/register`, {
+        const adminRes = await fetch(`${API}/api/admin/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: form.admin_email, password: form.admin_password, tenant_id: tenantId }),
@@ -78,16 +78,16 @@ export default function SuperDashboard() {
 
   async function handleSuspend(id) {
     if (!confirm('Suspend tenant? Bot akan berhenti.')) return;
-    await fetch(`${API}/tenant/${id}/suspend`, { method: 'POST', headers: authHeaders() });
+    await fetch(`${API}/api/tenant/${id}/suspend`, { method: 'POST', headers: authHeaders() });
     fetchTenants();
   }
   async function handleActivate(id) {
-    await fetch(`${API}/tenant/${id}/activate`, { method: 'POST', headers: authHeaders() });
+    await fetch(`${API}/api/tenant/${id}/activate`, { method: 'POST', headers: authHeaders() });
     fetchTenants();
   }
   async function handleDelete(id) {
     if (!confirm('Hapus tenant? Data akan terhapus permanen!')) return;
-    await fetch(`${API}/tenant/${id}`, { method: 'DELETE', headers: authHeaders() });
+    await fetch(`${API}/api/tenant/${id}`, { method: 'DELETE', headers: authHeaders() });
     fetchTenants();
   }
 
