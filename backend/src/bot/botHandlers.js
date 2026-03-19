@@ -601,11 +601,21 @@ module.exports = function registerHandlers(bot, tenant) {
       keyRows.push(navRow);
 
       await ctx.reply(
-        `🛍 *Daftar Produk*\n\n${listText}\n\n` +
-        `📄 Halaman ${safePage}/${totalPages}\n` +
+        `╭─────────────────────╮\n` +
+        `│      LIST PRODUK        │\n` +
+        `│   page ${safePage} / ${totalPages}              │\n` +
+        `├─────────────────────┤\n` +
+        `│                          │\n` +
+        `${pageItems.map((p, i) => {
+          const stock = parseInt(p.stock_count);
+          const icon  = stock > 0 ? '✅' : '❌';
+          return `│ ${icon} [${start + i + 1}] ${p.name} (${stock})`;
+        }).join('\n')}\n` +
+        `│                          │\n` +
+        `╰─────────────────────╯\n\n` +
         `Masukkan nomor untuk melihat detail.`,
         { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
-      );
+   );
     } catch (err) {
       console.error('showProductList error:', err);
       ctx.reply('Gagal memuat produk.');
