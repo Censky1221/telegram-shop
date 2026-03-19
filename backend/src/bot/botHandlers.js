@@ -1,6 +1,7 @@
 const { Markup } = require('telegraf');
 const axios      = require('axios');
 const { pool }   = require('../db/pool');
+const QRCode     = require('qrcode'); // ← Dipindahkan ke atas agar Railway bisa load dengan benar
 
 const PAGE_SIZE      = 9;
 const userProductMap = {};
@@ -323,17 +324,40 @@ module.exports = function registerHandlers(bot, tenant) {
       if (existing) {
         const isQrisString = existing.payment_url && !existing.payment_url.startsWith('http');
         if (isQrisString) {
-          return ctx.editMessageText(
-            `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\n` +
-            `📲 Kode QRIS:\n\`${existing.payment_url}\``,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
-                [Markup.button.callback('❌ Batal', 'cancel_buy')],
-              ])
-            }
-          ).catch(() => {});
+          // Ada pesanan pending dengan QRIS string — kirim ulang sebagai gambar
+          try {
+            const qrBuffer = await QRCode.toBuffer(existing.payment_url, {
+              type  : 'png',
+              width : 512,
+              margin: 2,
+              color : { dark: '#000000', light: '#ffffff' },
+            });
+            await ctx.deleteMessage().catch(() => {});
+            await ctx.replyWithPhoto(
+              { source: qrBuffer },
+              {
+                caption: `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\nScan QR di atas untuk melanjutkan pembayaran.`,
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                  [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
+                  [Markup.button.callback('❌ Batal', 'cancel_buy')],
+                ])
+              }
+            );
+          } catch {
+            return ctx.editMessageText(
+              `⚠️ Kamu masih punya pesanan yang belum dibayar.\n\n` +
+              `📲 Kode QRIS:\n\`${existing.payment_url}\``,
+              {
+                parse_mode: 'Markdown',
+                ...Markup.inlineKeyboard([
+                  [Markup.button.callback('✅ Saya Sudah Bayar', `check_pakasir_${existing.id}`)],
+                  [Markup.button.callback('❌ Batal', 'cancel_buy')],
+                ])
+              }
+            ).catch(() => {});
+          }
+          return;
         } else {
           return ctx.editMessageText(
             '⚠️ Kamu masih punya pesanan yang belum dibayar.',
@@ -355,7 +379,6 @@ module.exports = function registerHandlers(bot, tenant) {
 
       const gateway = tenantConfig?.payment_gateway || 'tripay';
 
-      // Validasi config sesuai gateway
       if (gateway === 'pakasir' && !tenantConfig?.pakasir_api_key) {
         return ctx.editMessageText('❌ Pakasir belum dikonfigurasi. Hubungi admin toko.').catch(() => {});
       }
@@ -417,9 +440,8 @@ module.exports = function registerHandlers(bot, tenant) {
           [Markup.button.callback('❌ Batal', 'cancel_buy')],
         ]);
 
-        // Generate gambar QR code dari string QRIS
+        // ── Generate & kirim gambar QR ─────────────────────
         try {
-          const QRCode = require('qrcode');
           const qrBuffer = await QRCode.toBuffer(result.payment_number, {
             type  : 'png',
             width : 512,
@@ -427,25 +449,31 @@ module.exports = function registerHandlers(bot, tenant) {
             color : { dark: '#000000', light: '#ffffff' },
           });
 
-          // Hapus pesan lama, kirim foto QR
+          // Hapus pesan lama
           await ctx.deleteMessage().catch(() => {});
+
+          // Kirim sebagai foto — gunakan Buffer langsung (kompatibel Railway)
           const sentMsg = await ctx.replyWithPhoto(
-            { source: qrBuffer, filename: 'qris.png' },
+            { source: qrBuffer },
             { caption, parse_mode: 'Markdown', ...keyboard }
           );
 
-          // Simpan chat_id & message_id agar QR bisa dihapus saat produk dikirim
+          // Simpan chat_id & message_id agar bisa dihapus saat produk dikirim
           if (sentMsg?.message_id) {
             await pool.query(
               `UPDATE orders SET chat_id=$1, message_id=$2 WHERE id=$3`,
               [sentMsg.chat.id, sentMsg.message_id, newOrder.id]
             );
           }
+
         } catch (qrErr) {
-          console.error('QR generate error:', qrErr.message);
-          // Fallback: kirim teks kode QRIS jika generate gagal
-          await ctx.editMessageText(
-            caption + `\n\n\`${result.payment_number}\``,
+          // Log full error agar mudah debug di Railway logs
+          console.error('QR generate error (full):', qrErr);
+
+          // Fallback: kirim teks kode QRIS
+          await ctx.deleteMessage().catch(() => {});
+          await ctx.reply(
+            caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``,
             { parse_mode: 'Markdown', ...keyboard }
           ).catch(() => {});
         }
@@ -519,8 +547,7 @@ module.exports = function registerHandlers(bot, tenant) {
         [tenantId]
       );
 
-      // Cek status transaksi ke Pakasir
-      // Coba beberapa kemungkinan endpoint
+      // Cek status transaksi ke Pakasir — coba beberapa kemungkinan endpoint
       let checkResp;
       const endpoints = [
         `${PAKASIR_URL}/transactionstatus`,
@@ -541,7 +568,7 @@ module.exports = function registerHandlers(bot, tenant) {
             { headers: { 'Content-Type': 'application/json' } }
           );
           console.log('Pakasir check response from', endpoint, ':', JSON.stringify(checkResp.data));
-          break; // berhasil, stop loop
+          break;
         } catch (e) {
           console.log(`Endpoint ${endpoint} failed:`, e.response?.status, e.response?.data || e.message);
           checkResp = null;
@@ -555,7 +582,6 @@ module.exports = function registerHandlers(bot, tenant) {
         );
       }
 
-      // Cek status — sesuaikan field ini dengan response docs Pakasir
       const paymentData = checkResp.data?.payment || checkResp.data;
       const isPaid =
         paymentData?.status === 'paid' ||
@@ -576,11 +602,16 @@ module.exports = function registerHandlers(bot, tenant) {
         [orderId, tenantId]
       );
 
-      await ctx.editMessageText(
+      await ctx.editMessageCaption(
         `✅ *Pembayaran Diterima!*\n\n` +
         `📨 Akun sedang dikirim ke chat ini...`,
         { parse_mode: 'Markdown' }
-      ).catch(() => {});
+      ).catch(() =>
+        ctx.editMessageText(
+          `✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim ke chat ini...`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {})
+      );
 
       const { assignStockAndDeliver } = require('../services/stockService');
       for (let i = 0; i < order.qty; i++) {
