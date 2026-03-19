@@ -3,8 +3,6 @@ const bcrypt  = require('bcrypt');
 const jwt     = require('jsonwebtoken');
 const router  = express.Router();
 const { pool } = require('../../db/pool');
-const variantsRouter = require('./variants');
-router.use('/admin', authMiddleware, variantsRouter);
 
 // ── Auth Middleware ───────────────────────────────────────────────
 function authMiddleware(req, res, next) {
@@ -51,7 +49,6 @@ router.post('/register', async (req, res) => {
   if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter' });
 
   try {
-    // Validasi tenant exists jika tenant_id diberikan
     if (tenant_id) {
       const { rows: [tenant] } = await pool.query(
         'SELECT id FROM tenants WHERE id=$1 AND status=$2', [tenant_id, 'active']
@@ -244,5 +241,9 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Deduct failed' });
   }
 });
+
+// ── Variants ──────────────────────────────────────────────────────
+const variantsRouter = require('./variants');
+router.use('/', authMiddleware, variantsRouter);
 
 module.exports = router;

@@ -2,10 +2,11 @@ const express  = require('express');
 const router   = express.Router();
 const { pool } = require('../../db/pool');
 
-// GET /api/admin/products/:productId/variants
-router.get('/products/:productId/variants', async (req, res) => {
-  const { productId } = req.params;
-  const tenantId      = req.tenant.id;
+// GET /api/admin/variants?productId=xxx
+router.get('/variants', async (req, res) => {
+  const { productId } = req.query;
+  const tenantId      = req.admin.tenant_id;
+  if (!productId) return res.status(400).json({ error: 'productId required' });
   try {
     const { rows } = await pool.query(
       `SELECT pv.*,
@@ -23,16 +24,18 @@ router.get('/products/:productId/variants', async (req, res) => {
   }
 });
 
-// POST /api/admin/products/:productId/variants
-router.post('/products/:productId/variants', async (req, res) => {
-  const { productId }              = req.params;
-  const { name, description, price } = req.body;
-  const tenantId                   = req.tenant.id;
+// POST /api/admin/variants
+router.post('/variants', async (req, res) => {
+  const { product_id, name, description, price } = req.body;
+  const tenantId = req.admin.tenant_id;
+  if (!product_id || !name || !price) {
+    return res.status(400).json({ error: 'product_id, name, and price required' });
+  }
   try {
     const { rows: [variant] } = await pool.query(
       `INSERT INTO product_variants (product_id, tenant_id, name, description, price)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [productId, tenantId, name, description || null, price]
+      [product_id, tenantId, name, description || null, price]
     );
     res.json(variant);
   } catch (err) {
@@ -42,9 +45,9 @@ router.post('/products/:productId/variants', async (req, res) => {
 
 // PUT /api/admin/variants/:id
 router.put('/variants/:id', async (req, res) => {
-  const { id }                          = req.params;
+  const { id }                                  = req.params;
   const { name, description, price, is_active } = req.body;
-  const tenantId                        = req.tenant.id;
+  const tenantId                                = req.admin.tenant_id;
   try {
     const fields = [];
     const values = [];
@@ -58,9 +61,11 @@ router.put('/variants/:id', async (req, res) => {
 
     values.push(id, tenantId);
     const { rows: [variant] } = await pool.query(
-      `UPDATE product_variants SET ${fields.join(', ')} WHERE id=$${idx++} AND tenant_id=$${idx} RETURNING *`,
+      `UPDATE product_variants SET ${fields.join(', ')}
+       WHERE id=$${idx++} AND tenant_id=$${idx} RETURNING *`,
       values
     );
+    if (!variant) return res.status(404).json({ error: 'Variant not found' });
     res.json(variant);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -70,7 +75,7 @@ router.put('/variants/:id', async (req, res) => {
 // DELETE /api/admin/variants/:id
 router.delete('/variants/:id', async (req, res) => {
   const { id }   = req.params;
-  const tenantId = req.tenant.id;
+  const tenantId = req.admin.tenant_id;
   try {
     await pool.query(
       `DELETE FROM product_variants WHERE id=$1 AND tenant_id=$2`,
