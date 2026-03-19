@@ -600,20 +600,23 @@ module.exports = function registerHandlers(bot, tenant) {
       navRow.push(Markup.button.text('🏠 Menu'));
       keyRows.push(navRow);
 
+      const divider = `┊ - - - - - - - - - - - - - - - -`;
+      const lines = pageItems.map((p, i) => {
+        const stock = parseInt(p.stock_count);
+        const icon  = stock > 0 ? '✅' : '❌';
+        return `┊ ${icon} [${start + i + 1}] ${p.name} (${stock})`;
+      }).join('\n');
+
       await ctx.reply(
-        `╭------------------- ╮\n` +
-        `┊   LIST PRODUK        \n` +
-        `┊   page ${safePage} / ${totalPages}              \n` +
-        `┊---------------------\n` +
-        `${pageItems.map((p, i) => {
-          const stock = parseInt(p.stock_count);
-          const icon  = stock > 0 ? '✅' : '❌';
-          return `│ ${icon} [${start + i + 1}] ${p.name} (${stock})`;
-        }).join('\n')}\n` +
-        `╰------------------- ╯\n\n` +
-        `Masukkan nomor untuk melihat detail.`,
+        `╭ - - - - - - - - - - - - - - - - ╮\n` +
+        `┊  LIST PRODUK\n` +
+        `┊  page ${safePage} / ${totalPages}\n` +
+        `${divider}\n` +
+        `${lines}\n` +
+        `╰ - - - - - - - - - - - - - - - - ╯\n\n` +
+        `_Ketik nomor untuk melihat detail._`,
         { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
-   );
+ );
     } catch (err) {
       console.error('showProductList error:', err);
       ctx.reply('Gagal memuat produk.');
