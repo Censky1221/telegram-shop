@@ -27,7 +27,7 @@ export default function OrdersPage() {
     setLoading(true);
     try {
       const qs = filter ? `?status=${filter}` : '';
-      const res = await fetch(`${API}/admin/orders${qs}`, { headers: authHeaders() });
+      const res = await fetch(`${API}/api/admin/orders${qs}`, { headers: authHeaders() });
       setOrders(await res.json());
     } finally { setLoading(false); }
   }

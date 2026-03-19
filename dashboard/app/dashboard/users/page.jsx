@@ -24,7 +24,7 @@ export default function UsersPage() {
   async function fetchUsers() {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/admin/users`, { headers: authHeaders() });
+      const res = await fetch(`${API}/api/admin/users`, { headers: authHeaders() });
       setUsers(await res.json());
     } finally { setLoading(false); }
   }
@@ -35,8 +35,8 @@ export default function UsersPage() {
     setMsg('');
     try {
       const endpoint = mode === 'topup'
-        ? `${API}/admin/users/${selected.id}/topup`
-        : `${API}/admin/users/${selected.id}/deduct`;
+        ? `${API}/api/admin/users/${selected.id}/topup`
+        : `${API}/api/admin/users/${selected.id}/deduct`;
       const res  = await fetch(endpoint, {
         method: 'POST',
         headers: authHeaders(),

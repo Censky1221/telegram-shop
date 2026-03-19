@@ -19,7 +19,7 @@ export default function ProductsPage() {
   useEffect(() => { fetchProducts(); }, []);
 
   async function fetchProducts() {
-    const res = await fetch(`${API}/admin/products`, { headers: authHeaders() });
+    const res = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
     setProducts(await res.json());
   }
 
@@ -27,7 +27,7 @@ export default function ProductsPage() {
     if (!form.name || !form.price) return alert('Name and price are required.');
     setLoading(true);
     try {
-      const url    = editing ? `${API}/admin/products/${editing}` : `${API}/admin/products`;
+      const url    = editing ? `${API}/api/admin/products/${editing}` : `${API}/api/admin/products`;
       const method = editing ? 'PUT' : 'POST';
       await fetch(url, { method, headers: authHeaders(), body: JSON.stringify({ ...form, price: parseInt(form.price) }) });
       setForm({ name: '', description: '', price: '' });
@@ -38,7 +38,7 @@ export default function ProductsPage() {
 
   async function handleDelete(id) {
     if (!confirm('Deactivate this product?')) return;
-    await fetch(`${API}/admin/products/${id}`, { method: 'DELETE', headers: authHeaders() });
+    await fetch(`${API}/api/admin/products/${id}`, { method: 'DELETE', headers: authHeaders() });
     fetchProducts();
   }
 

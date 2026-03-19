@@ -20,14 +20,14 @@ export default function StocksPage() {
   useEffect(() => { fetchProducts(); }, []);
 
   async function fetchProducts() {
-    const res = await fetch(`${API}/admin/products`, { headers: authHeaders() });
+    const res = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
     const data = await res.json();
     setProducts(data);
   }
 
   async function fetchStocks() {
     if (!selectedProduct) return;
-    const res = await fetch(`${API}/admin/stocks/${selectedProduct}`, { headers: authHeaders() });
+    const res = await fetch(`${API}/api/admin/stocks/${selectedProduct}`, { headers: authHeaders() });
     setStocks(await res.json());
   }
 
@@ -45,7 +45,7 @@ export default function StocksPage() {
 
     setUploading(true);
     try {
-      const res = await fetch(`${API}/admin/stocks/upload`, {
+      const res = await fetch(`${API}/api/admin/stocks/upload`, {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({ product_id: parseInt(selectedProduct), stocks: stockItems }),
