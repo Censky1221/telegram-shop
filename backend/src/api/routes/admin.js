@@ -242,8 +242,4 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
   }
 });
 
-// ── Variants ──────────────────────────────────────────────────────
-const variantsRouter = require('./variants');
-router.use('/', authMiddleware, variantsRouter);
-
 module.exports = router;

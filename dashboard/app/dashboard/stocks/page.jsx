@@ -64,7 +64,6 @@ export default function StocksPage() {
     <div>
       <h1 className="text-2xl font-semibold mb-6">🗄️ Stock Management</h1>
 
-      {/* Upload section */}
       <div className="bg-white rounded-2xl shadow p-6 mb-6">
         <h2 className="font-medium mb-4">Upload Stock</h2>
 
@@ -107,7 +106,6 @@ export default function StocksPage() {
         )}
       </div>
 
-      {/* Stock list */}
       {selectedProduct && (
         <div className="bg-white rounded-2xl shadow overflow-hidden">
           <div className="px-6 py-4 border-b flex items-center justify-between">
@@ -134,9 +132,7 @@ export default function StocksPage() {
                   <td className="px-4 py-2 font-mono text-xs">{s.email}</td>
                   <td className="px-4 py-2">
                     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      s.status === 'available'
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-red-100 text-red-600'}`}>
+                      s.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
                       {s.status}
                     </span>
                   </td>

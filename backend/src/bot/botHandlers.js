@@ -5,7 +5,6 @@ const QRCode     = require('qrcode');
 
 const PAGE_SIZE      = 9;
 const userProductMap = {};
-const userVariantMap = {};
 const userCart       = {};
 const PAKASIR_URL    = 'https://app.pakasir.com/api';
 
@@ -98,20 +97,10 @@ module.exports = function registerHandlers(bot, tenant) {
   // ── User ketik nomor ──────────────────────────────────────
   bot.hears(/^(\d+)$/, async (ctx) => {
     const num        = ctx.message.text;
-    const userId     = ctx.from.id;
-    const variantKey = `${tenantId}_${userId}_variants`;
-    const productKey = `${tenantId}_${userId}`;
+    const productKey = `${tenantId}_${ctx.from.id}`;
 
-    // Cek apakah sedang di menu varian
-    if (userVariantMap[variantKey]?.[num]) {
-      await showVariantDetail(ctx, userVariantMap[variantKey][num], 1);
-      return;
-    }
-
-    // Cek apakah sedang di menu produk
     if (userProductMap[productKey]?.[num]) {
-      await showVariantList(ctx, userProductMap[productKey][num]);
-      return;
+      await showProductDetail(ctx, userProductMap[productKey][num], 1);
     }
   });
 
@@ -119,72 +108,69 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.action(/^qty_(plus|minus)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const dir       = ctx.match[1];
-    const variantId = parseInt(ctx.match[2]);
+    const productId = parseInt(ctx.match[2]);
     const cartKey   = `${tenantId}_${ctx.from.id}`;
 
-    if (!userCart[cartKey] || userCart[cartKey].variantId !== variantId) {
-      userCart[cartKey] = { variantId, qty: 1 };
+    if (!userCart[cartKey] || userCart[cartKey].productId !== productId) {
+      userCart[cartKey] = { productId, qty: 1 };
     }
     const cart = userCart[cartKey];
 
-    const { rows: [v] } = await pool.query(
+    const { rows: [p] } = await pool.query(
       `SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-       FROM product_variants pv
-       LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pv.id=$1 AND pv.tenant_id=$2
-       GROUP BY pv.id`,
-      [variantId, tenantId]
+       FROM products p
+       LEFT JOIN stocks s ON s.product_id = p.id
+       WHERE p.id=$1 AND p.tenant_id=$2
+       GROUP BY p.id`,
+      [productId, tenantId]
     );
-    const maxStock = parseInt(v?.stock_count || 0);
+    const maxStock = parseInt(p?.stock_count || 0);
 
     if (dir === 'plus'  && cart.qty < maxStock) cart.qty++;
     if (dir === 'minus' && cart.qty > 1)        cart.qty--;
 
     try {
       await ctx.editMessageReplyMarkup(
-        buildVariantKeyboard(variantId, cart.qty, maxStock > 0).reply_markup
+        buildProductKeyboard(productId, cart.qty, maxStock > 0).reply_markup
       );
     } catch {}
   });
 
   // ── Beli Sekarang ─────────────────────────────────────────
-  bot.action(/^buy_v_(\d+)$/, async (ctx) => {
+  bot.action(/^buy_p_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const variantId = parseInt(ctx.match[1]);
+    const productId = parseInt(ctx.match[1]);
     const cartKey   = `${tenantId}_${ctx.from.id}`;
     const qty       = userCart[cartKey]?.qty || 1;
 
-    const { rows: [variant] } = await pool.query(
-      `SELECT pv.*, p.name AS product_name
-       FROM product_variants pv
-       JOIN products p ON p.id = pv.product_id
-       WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
-      [variantId, tenantId]
+    const { rows: [product] } = await pool.query(
+      `SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+      [productId, tenantId]
     );
-    if (!variant) return ctx.answerCbQuery('Varian tidak ditemukan.', { show_alert: true });
+    if (!product) return ctx.answerCbQuery('Produk tidak ditemukan.', { show_alert: true });
 
-    const total = variant.price * qty;
+    const total = product.price * qty;
 
     const text =
       `💳 *Pilih Metode Pembayaran*\n\n` +
-      `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
+      `📦 ${product.name} x${qty}\n` +
       `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
       `Pilih metode bayar:`;
 
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_v_${variantId}_${qty}`)],
-        [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_v_${variantId}_${qty}`)],
+        [Markup.button.callback('💳 Bayar via QRIS/Transfer', `pay_qris_p_${productId}_${qty}`)],
+        [Markup.button.callback('💰 Bayar via Saldo',         `pay_saldo_p_${productId}_${qty}`)],
         [Markup.button.callback('❌ Batal', 'cancel_buy')],
       ]),
     }).catch(() => {});
   });
 
   // ── Bayar via Saldo ───────────────────────────────────────
-  bot.action(/^pay_saldo_v_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^pay_saldo_p_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const variantId  = parseInt(ctx.match[1]);
+    const productId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -195,16 +181,13 @@ module.exports = function registerHandlers(bot, tenant) {
       );
       if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
 
-      const { rows: [variant] } = await pool.query(
-        `SELECT pv.*, p.name AS product_name
-         FROM product_variants pv
-         JOIN products p ON p.id = pv.product_id
-         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
-        [variantId, tenantId]
+      const { rows: [product] } = await pool.query(
+        `SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+        [productId, tenantId]
       );
-      if (!variant) return ctx.editMessageText('Varian tidak ditemukan.').catch(() => {});
+      if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
 
-      const total = variant.price * qty;
+      const total = product.price * qty;
 
       if ((user.balance || 0) < total) {
         return ctx.editMessageText(
@@ -217,36 +200,36 @@ module.exports = function registerHandlers(bot, tenant) {
       }
 
       const { rows: [sc] } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM stocks WHERE variant_id=$1 AND tenant_id=$2 AND status='available'`,
-        [variantId, tenantId]
+        `SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
+        [productId, tenantId]
       );
       if (parseInt(sc.cnt) < qty)
         return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt} akun.`).catch(() => {});
 
       await ctx.editMessageText(
         `✅ *Konfirmasi Pembelian*\n\n` +
-        `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
+        `📦 ${product.name} x${qty}\n` +
         `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
         `💳 Saldo setelah bayar: *Rp ${Number((user.balance || 0) - total).toLocaleString('id-ID')}*\n\n` +
         `Lanjutkan?`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_v_${variantId}_${qty}`)],
+            [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_p_${productId}_${qty}`)],
             [Markup.button.callback('❌ Batal', 'cancel_buy')],
           ]),
         }
       ).catch(() => {});
     } catch (err) {
-      console.error('pay_saldo_v error:', err);
+      console.error('pay_saldo_p error:', err);
       ctx.editMessageText('Terjadi kesalahan. Coba lagi.').catch(() => {});
     }
   });
 
   // ── Konfirmasi Saldo ──────────────────────────────────────
-  bot.action(/^confirm_saldo_v_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^confirm_saldo_p_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery('Memproses...'); } catch {}
-    const variantId  = parseInt(ctx.match[1]);
+    const productId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -260,14 +243,12 @@ module.exports = function registerHandlers(bot, tenant) {
         'SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE',
         [telegramId, tenantId]
       );
-      const { rows: [variant] } = await client.query(
-        `SELECT pv.*, p.name AS product_name, p.id AS pid
-         FROM product_variants pv JOIN products p ON p.id=pv.product_id
-         WHERE pv.id=$1 AND pv.tenant_id=$2`,
-        [variantId, tenantId]
+      const { rows: [product] } = await client.query(
+        `SELECT * FROM products WHERE id=$1 AND tenant_id=$2`,
+        [productId, tenantId]
       );
 
-      const total = variant.price * qty;
+      const total = product.price * qty;
       if ((user.balance || 0) < total) {
         await client.query('ROLLBACK');
         return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {});
@@ -276,16 +257,16 @@ module.exports = function registerHandlers(bot, tenant) {
       await client.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [total, user.id]);
 
       const { rows: [order] } = await client.query(
-        `INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id)
-         VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`,
-        [user.id, variant.pid, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]
+        `INSERT INTO orders (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id)
+         VALUES ($1,$2,$3,$4,'paid',$5,NOW(),$6) RETURNING *`,
+        [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]
       );
 
       await client.query('COMMIT');
 
       await ctx.editMessageText(
         `✅ *Pembayaran Berhasil!*\n\n` +
-        `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
+        `📦 ${product.name} x${qty}\n` +
         `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
         `📨 Akun sedang dikirim ke chat ini...`,
         { parse_mode: 'Markdown' }
@@ -298,7 +279,7 @@ module.exports = function registerHandlers(bot, tenant) {
 
     } catch (err) {
       await client.query('ROLLBACK');
-      console.error('confirm_saldo_v error:', err);
+      console.error('confirm_saldo_p error:', err);
       ctx.editMessageText('❌ Terjadi kesalahan. Hubungi admin.').catch(() => {});
     } finally {
       client.release();
@@ -306,9 +287,9 @@ module.exports = function registerHandlers(bot, tenant) {
   });
 
   // ── Bayar via QRIS ────────────────────────────────────────
-  bot.action(/^pay_qris_v_(\d+)_(\d+)$/, async (ctx) => {
+  bot.action(/^pay_qris_p_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const variantId  = parseInt(ctx.match[1]);
+    const productId  = parseInt(ctx.match[1]);
     const qty        = parseInt(ctx.match[2]);
     const telegramId = ctx.from.id.toString();
 
@@ -319,17 +300,15 @@ module.exports = function registerHandlers(bot, tenant) {
       );
       if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
 
-      const { rows: [variant] } = await pool.query(
-        `SELECT pv.*, p.name AS product_name, p.id AS pid
-         FROM product_variants pv JOIN products p ON p.id=pv.product_id
-         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
-        [variantId, tenantId]
+      const { rows: [product] } = await pool.query(
+        `SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+        [productId, tenantId]
       );
-      if (!variant) return ctx.editMessageText('Varian tidak ditemukan.').catch(() => {});
+      if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
 
       const { rows: [sc] } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM stocks WHERE variant_id=$1 AND tenant_id=$2 AND status='available'`,
-        [variantId, tenantId]
+        `SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
+        [productId, tenantId]
       );
       if (parseInt(sc.cnt) < qty)
         return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt} akun.`).catch(() => {});
@@ -337,9 +316,9 @@ module.exports = function registerHandlers(bot, tenant) {
       // Cek pesanan pending
       const { rows: [existing] } = await pool.query(
         `SELECT id, payment_url FROM orders
-         WHERE user_id=$1 AND variant_id=$2 AND status='pending' AND tenant_id=$3
+         WHERE user_id=$1 AND product_id=$2 AND status='pending' AND tenant_id=$3
            AND created_at > NOW() - INTERVAL '2 hours'`,
-        [user.id, variantId, tenantId]
+        [user.id, productId, tenantId]
       );
       if (existing) {
         const isQrisString = existing.payment_url && !existing.payment_url.startsWith('http');
@@ -371,7 +350,7 @@ module.exports = function registerHandlers(bot, tenant) {
         }
       }
 
-      const total          = variant.price * qty;
+      const total          = product.price * qty;
       const paymentOrderId = `ORDER-${Date.now()}-${user.id}`;
 
       const { rows: [tenantConfig] } = await pool.query(
@@ -396,15 +375,15 @@ module.exports = function registerHandlers(bot, tenant) {
       const result = await createPayment(config, {
         orderId     : paymentOrderId,
         amount      : total,
-        productName : `${variant.product_name} - ${variant.name} x${qty}`,
+        productName : `${product.name} x${qty}`,
         customerName: ctx.from.first_name || 'Customer',
       });
 
       if (gateway === 'pakasir') {
         const { rows: [newOrder] } = await pool.query(
-          `INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id)
-           VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING id`,
-          [user.id, variant.pid, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]
+          `INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,'pending',$6,$7) RETURNING id`,
+          [user.id, productId, paymentOrderId, result.payment_number, total, qty, tenantId]
         );
 
         const expiredText = result.expired_at
@@ -413,7 +392,7 @@ module.exports = function registerHandlers(bot, tenant) {
 
         const caption =
           `🧾 *Pesanan Dibuat!*\n\n` +
-          `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
+          `📦 ${product.name} x${qty}\n` +
           `💰 Total: *Rp ${Number(result.total_payment || total).toLocaleString('id-ID')}*\n` +
           expiredText + `\n\n` +
           `📲 *Cara Bayar QRIS:*\n` +
@@ -442,18 +421,18 @@ module.exports = function registerHandlers(bot, tenant) {
 
       } else {
         await pool.query(
-          `INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id)
-           VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`,
-          [user.id, variant.pid, variantId, paymentOrderId, result.payment_url, total, qty, tenantId]
+          `INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id)
+           VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`,
+          [user.id, productId, paymentOrderId, result.payment_url, total, qty, tenantId]
         );
         await ctx.editMessageText(
-          `🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *2 jam*.`,
+          `🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *2 jam*.`,
           { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }
         ).catch(() => {});
       }
 
     } catch (err) {
-      console.error('pay_qris_v error:', err);
+      console.error('pay_qris_p error:', err);
       ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {});
     }
   });
@@ -570,19 +549,6 @@ module.exports = function registerHandlers(bot, tenant) {
     await showProductList(ctx, page);
   });
 
-  bot.action(/^back_to_variants_(\d+)$/, async (ctx) => {
-    try { await ctx.answerCbQuery(); } catch {}
-    const variantId = parseInt(ctx.match[1]);
-    // Ambil product_id dari variant
-    try {
-      const { rows: [v] } = await pool.query(
-        `SELECT product_id FROM product_variants WHERE id=$1 AND tenant_id=$2`,
-        [variantId, tenantId]
-      );
-      if (v) await showVariantList(ctx, v.product_id);
-    } catch {}
-  });
-
   bot.action('no_stock', (ctx) => ctx.answerCbQuery('Stok sedang habis.', { show_alert: true }));
   bot.action('qty_noop', (ctx) => { try { ctx.answerCbQuery(); } catch {} });
 
@@ -590,13 +556,16 @@ module.exports = function registerHandlers(bot, tenant) {
   // HELPER FUNCTIONS
   // ─────────────────────────────────────────────────────────
 
-  // Daftar Produk — hanya nama, tanpa stok
+  // Daftar Produk — nama + stok
   async function showProductList(ctx, page) {
     try {
       const { rows: allProducts } = await pool.query(
-        `SELECT p.id, p.name
+        `SELECT p.id, p.name,
+                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
          FROM products p
+         LEFT JOIN stocks s ON s.product_id = p.id
          WHERE p.is_active=true AND p.tenant_id=$1
+         GROUP BY p.id
          ORDER BY p.id`,
         [tenantId]
       );
@@ -614,7 +583,11 @@ module.exports = function registerHandlers(bot, tenant) {
       userProductMap[key] = { _page: safePage };
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
 
-      const listText = pageItems.map((p, i) => `${start + i + 1}. ${p.name}`).join('\n');
+      const listText = pageItems.map((p, i) => {
+        const stock    = parseInt(p.stock_count);
+        const stokInfo = stock > 0 ? `✅ Stok ${stock}` : '❌ Habis';
+        return `${start + i + 1}. ${p.name} — ${stokInfo}`;
+      }).join('\n');
 
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
@@ -630,7 +603,7 @@ module.exports = function registerHandlers(bot, tenant) {
       await ctx.reply(
         `🛍 *Daftar Produk*\n\n${listText}\n\n` +
         `📄 Halaman ${safePage}/${totalPages}\n` +
-        `Masukkan nomor untuk melihat pilihan.`,
+        `Masukkan nomor untuk melihat detail.`,
         { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
       );
     } catch (err) {
@@ -639,107 +612,52 @@ module.exports = function registerHandlers(bot, tenant) {
     }
   }
 
-  // Daftar Varian — tampil nama + harga + stok
-  async function showVariantList(ctx, productId) {
+  // Detail Produk — qty picker + beli sekarang
+  async function showProductDetail(ctx, productId, qty = 1) {
     try {
       const { rows: [product] } = await pool.query(
-        `SELECT id, name FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+        `SELECT p.*,
+                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+         FROM products p
+         LEFT JOIN stocks s ON s.product_id = p.id
+         WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true
+         GROUP BY p.id`,
         [productId, tenantId]
       );
       if (!product) return ctx.reply('Produk tidak ditemukan.');
 
-      const { rows: variants } = await pool.query(
-        `SELECT pv.id, pv.name, pv.price,
-                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM product_variants pv
-         LEFT JOIN stocks s ON s.variant_id = pv.id
-         WHERE pv.product_id=$1 AND pv.tenant_id=$2 AND pv.is_active=true
-         GROUP BY pv.id
-         ORDER BY pv.id`,
-        [productId, tenantId]
-      );
-
-      if (!variants.length) {
-        return ctx.reply(
-          `📦 *${product.name}*\n\nBelum ada varian tersedia.`,
-          { parse_mode: 'Markdown', ...Markup.keyboard([['🏠 Menu']]).resize() }
-        );
-      }
-
-      const variantKey = `${tenantId}_${ctx.from.id}_variants`;
-      userVariantMap[variantKey] = {};
-      variants.forEach((v, i) => { userVariantMap[variantKey][String(i + 1)] = v.id; });
-
-      const listText = variants.map((v, i) => {
-        const stock   = parseInt(v.stock_count);
-        const harga   = `Rp ${Number(v.price).toLocaleString('id-ID')}`;
-        const stokInfo = stock > 0 ? `✅ Stok ${stock}` : '❌ Habis';
-        return `${i + 1}. ${v.name} — ${harga} | ${stokInfo}`;
-      }).join('\n');
-
-      const keyRows = [];
-      const numKeys = variants.map((_, i) => String(i + 1));
-      for (let i = 0; i < numKeys.length; i += 6)
-        keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
-      keyRows.push([Markup.button.text('🏠 Menu')]);
-
-      await ctx.reply(
-        `📦 *${product.name}*\n\n${listText}\n\nMasukkan nomor untuk memilih varian.`,
-        { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }
-      );
-    } catch (err) {
-      console.error('showVariantList error:', err);
-      ctx.reply('Gagal memuat varian.');
-    }
-  }
-
-  // Detail Varian — qty picker + beli sekarang
-  async function showVariantDetail(ctx, variantId, qty = 1) {
-    try {
-      const { rows: [variant] } = await pool.query(
-        `SELECT pv.*, p.name AS product_name,
-                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM product_variants pv
-         LEFT JOIN stocks s ON s.variant_id = pv.id
-         JOIN products p ON p.id = pv.product_id
-         WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true
-         GROUP BY pv.id, p.name`,
-        [variantId, tenantId]
-      );
-      if (!variant) return ctx.reply('Varian tidak ditemukan.');
-
-      const stock   = parseInt(variant.stock_count);
+      const stock   = parseInt(product.stock_count);
       const inStock = stock > 0;
       const cartKey = `${tenantId}_${ctx.from.id}`;
-      userCart[cartKey] = { variantId, qty };
+      userCart[cartKey] = { productId, qty };
 
       const text =
-        `🏷 *${variant.product_name} - ${variant.name}*\n\n` +
-        `📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n` +
+        `🏷 *${product.name}*\n\n` +
+        `📝 ${product.description || 'Tidak ada deskripsi.'}\n\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n` +
+        `💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n` +
         `📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n\n` +
         `Atur jumlah lalu tekan *Beli Sekarang*`;
 
-      await ctx.reply(text, { parse_mode: 'Markdown', ...buildVariantKeyboard(variantId, qty, inStock) });
+      await ctx.reply(text, { parse_mode: 'Markdown', ...buildProductKeyboard(productId, qty, inStock) });
     } catch (err) {
-      console.error('showVariantDetail error:', err);
-      ctx.reply('Gagal memuat detail varian.');
+      console.error('showProductDetail error:', err);
+      ctx.reply('Gagal memuat detail produk.');
     }
   }
 
-  function buildVariantKeyboard(variantId, qty, inStock) {
+  function buildProductKeyboard(productId, qty, inStock) {
     return Markup.inlineKeyboard([
       [
-        Markup.button.callback('➖', `qty_minus_${variantId}`),
+        Markup.button.callback('➖', `qty_minus_${productId}`),
         Markup.button.callback(`  ${qty}  `, 'qty_noop'),
-        Markup.button.callback('➕', `qty_plus_${variantId}`),
+        Markup.button.callback('➕', `qty_plus_${productId}`),
       ],
       inStock
-        ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x' + qty + ')' : ''} Sekarang`, `buy_v_${variantId}`)]
+        ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x' + qty + ')' : ''} Sekarang`, `buy_p_${productId}`)]
         : [Markup.button.callback('❌ Stok Habis', 'no_stock')],
-      [Markup.button.callback('◀️ Kembali ke Pilihan', `back_to_variants_${variantId}`)],
+      [Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')],
     ]);
   }
 };
