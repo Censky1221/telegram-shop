@@ -36,9 +36,15 @@ export default function ProductsPage() {
     } finally { setLoading(false); }
   }
 
-  async function handleDelete(id) {
-    if (!confirm('Deactivate this product?')) return;
+  async function handleDeactivate(id) {
+    if (!confirm('Nonaktifkan produk ini?')) return;
     await fetch(`${API}/api/admin/products/${id}`, { method: 'DELETE', headers: authHeaders() });
+    fetchProducts();
+  }
+
+  async function handleHapus(id) {
+    if (!confirm('HAPUS PERMANEN produk ini? Semua stok terkait juga akan dihapus!')) return;
+    await fetch(`${API}/api/admin/products/${id}/destroy`, { method: 'DELETE', headers: authHeaders() });
     fetchProducts();
   }
 
@@ -124,7 +130,8 @@ export default function ProductsPage() {
                 </td>
                 <td className="px-4 py-3 flex gap-2">
                   <button onClick={() => startEdit(p)} className="text-blue-600 hover:underline text-xs">Edit</button>
-                  <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:underline text-xs">Deactivate</button>
+                  <button onClick={() => handleDeactivate(p.id)} className="text-yellow-600 hover:underline text-xs">Nonaktifkan</button>
+                  <button onClick={() => handleHapus(p.id)} className="text-red-500 hover:underline text-xs">Hapus</button>
                 </td>
               </tr>
             ))}
@@ -163,10 +170,16 @@ export default function ProductsPage() {
                 Edit
               </button>
               <button
-                onClick={() => handleDelete(p.id)}
+                onClick={() => handleDeactivate(p.id)}
+                className="flex-1 text-center text-sm text-yellow-600 border border-yellow-200 py-1.5 rounded-lg hover:bg-yellow-50 transition"
+              >
+                Nonaktifkan
+              </button>
+              <button
+                onClick={() => handleHapus(p.id)}
                 className="flex-1 text-center text-sm text-red-500 border border-red-200 py-1.5 rounded-lg hover:bg-red-50 transition"
               >
-                Deactivate
+                Hapus
               </button>
             </div>
           </div>

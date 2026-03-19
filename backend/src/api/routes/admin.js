@@ -242,4 +242,15 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
   }
 });
 
+// Hapus permanen produk + stoknya
+router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM stocks WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    res.json({ message: 'Product deleted permanently' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
