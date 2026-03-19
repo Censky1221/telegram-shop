@@ -29,7 +29,7 @@ export default function VariantsPage() {
   }
 
   async function fetchVariants(productId) {
-    const res = await fetch(`${API}/api/admin/products/${productId}/variants`, { headers: authHeaders() });
+    const res = await fetch(`${API}/api/admin/variants?productId=${productId}`, { headers: authHeaders() });
     setVariants(await res.json());
   }
 
@@ -37,9 +37,21 @@ export default function VariantsPage() {
     if (!form.name || !form.price) return alert('Nama dan harga wajib diisi.');
     setLoading(true);
     try {
-      const url    = editing ? `${API}/api/admin/variants/${editing}` : `${API}/api/admin/products/${selected}/variants`;
-      const method = editing ? 'PUT' : 'POST';
-      await fetch(url, { method, headers: authHeaders(), body: JSON.stringify({ ...form, price: parseInt(form.price) }) });
+      if (editing) {
+        // UPDATE existing variant
+        await fetch(`${API}/api/admin/variants/${editing}`, {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify({ ...form, price: parseInt(form.price) }),
+        });
+      } else {
+        // CREATE new variant
+        await fetch(`${API}/api/admin/variants`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ product_id: selected, ...form, price: parseInt(form.price) }),
+        });
+      }
       setForm({ name: '', description: '', price: '' });
       setEditing(null);
       await fetchVariants(selected);
