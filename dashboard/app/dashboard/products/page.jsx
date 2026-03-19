@@ -11,10 +11,10 @@ function authHeaders() {
 }
 
 export default function ProductsPage() {
-  const [products, setProducts] = useState([]);
-  const [form, setForm] = useState({ name: '', description: '', price: '' });
-  const [editing, setEditing] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [products, setProducts]  = useState([]);
+  const [form, setForm]          = useState({ name: '', description: '', price: '' });
+  const [editing, setEditing]    = useState(null);
+  const [loading, setLoading]    = useState(false);
 
   useEffect(() => { fetchProducts(); }, []);
 
@@ -45,39 +45,59 @@ export default function ProductsPage() {
   function startEdit(p) {
     setEditing(p.id);
     setForm({ name: p.name, description: p.description || '', price: String(p.price) });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold mb-6">📦 Products</h1>
+      <h1 className="text-xl md:text-2xl font-semibold mb-4 md:mb-6">📦 Products</h1>
 
       {/* Form */}
-      <div className="bg-white rounded-2xl shadow p-6 mb-6">
-        <h2 className="font-medium mb-4">{editing ? 'Edit Product' : 'Add New Product'}</h2>
+      <div className="bg-white rounded-2xl shadow p-4 md:p-6 mb-4 md:mb-6">
+        <h2 className="font-medium mb-3 md:mb-4">{editing ? 'Edit Product' : 'Add New Product'}</h2>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <input className="border rounded-lg px-3 py-2 text-sm" placeholder="Product name"
-            value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          <input className="border rounded-lg px-3 py-2 text-sm" placeholder="Price (IDR e.g. 50000)"
-            type="number" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} />
-          <textarea className="border rounded-lg px-3 py-2 text-sm sm:col-span-2" rows={2} placeholder="Description"
-            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+          <input
+            className="border rounded-lg px-3 py-2.5 text-sm w-full"
+            placeholder="Product name"
+            value={form.name}
+            onChange={e => setForm({ ...form, name: e.target.value })}
+          />
+          <input
+            className="border rounded-lg px-3 py-2.5 text-sm w-full"
+            placeholder="Price (IDR e.g. 50000)"
+            type="number"
+            value={form.price}
+            onChange={e => setForm({ ...form, price: e.target.value })}
+          />
+          <textarea
+            className="border rounded-lg px-3 py-2.5 text-sm sm:col-span-2 w-full"
+            rows={2}
+            placeholder="Description"
+            value={form.description}
+            onChange={e => setForm({ ...form, description: e.target.value })}
+          />
         </div>
-        <div className="mt-3 flex gap-2">
-          <button onClick={handleSave} disabled={loading}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg disabled:opacity-50 transition">
-            {loading ? 'Saving...' : editing ? 'Update' : 'Add Product'}
+        <div className="mt-3 flex gap-2 flex-wrap">
+          <button
+            onClick={handleSave}
+            disabled={loading}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2.5 rounded-lg disabled:opacity-50 transition"
+          >
+            {loading ? 'Saving...' : editing ? 'Update Product' : 'Add Product'}
           </button>
           {editing && (
-            <button onClick={() => { setEditing(null); setForm({ name:'', description:'', price:'' }); }}
-              className="bg-gray-200 hover:bg-gray-300 text-sm px-4 py-2 rounded-lg transition">
+            <button
+              onClick={() => { setEditing(null); setForm({ name: '', description: '', price: '' }); }}
+              className="bg-gray-200 hover:bg-gray-300 text-sm px-4 py-2.5 rounded-lg transition"
+            >
               Cancel
             </button>
           )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-white rounded-2xl shadow overflow-hidden">
+      {/* Desktop Table */}
+      <div className="hidden md:block bg-white rounded-2xl shadow overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-gray-600 text-left">
             <tr>
@@ -103,10 +123,8 @@ export default function ProductsPage() {
                   </span>
                 </td>
                 <td className="px-4 py-3 flex gap-2">
-                  <button onClick={() => startEdit(p)}
-                    className="text-blue-600 hover:underline text-xs">Edit</button>
-                  <button onClick={() => handleDelete(p.id)}
-                    className="text-red-500 hover:underline text-xs">Deactivate</button>
+                  <button onClick={() => startEdit(p)} className="text-blue-600 hover:underline text-xs">Edit</button>
+                  <button onClick={() => handleDelete(p.id)} className="text-red-500 hover:underline text-xs">Deactivate</button>
                 </td>
               </tr>
             ))}
@@ -115,6 +133,47 @@ export default function ProductsPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile Cards */}
+      <div className="md:hidden space-y-3">
+        {products.map(p => (
+          <div key={p.id} className="bg-white rounded-2xl shadow p-4">
+            <div className="flex items-start justify-between gap-2 mb-2">
+              <div>
+                <p className="font-semibold text-gray-800">{p.name}</p>
+                <p className="text-blue-600 font-medium text-sm mt-0.5">
+                  Rp {Number(p.price).toLocaleString('id-ID')}
+                </p>
+              </div>
+              <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                {p.is_active ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+            <div className="flex gap-4 text-sm text-gray-500 mb-3">
+              <span>✅ {p.available} tersedia</span>
+              <span>📦 {p.sold} terjual</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => startEdit(p)}
+                className="flex-1 text-center text-sm text-blue-600 border border-blue-200 py-1.5 rounded-lg hover:bg-blue-50 transition"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => handleDelete(p.id)}
+                className="flex-1 text-center text-sm text-red-500 border border-red-200 py-1.5 rounded-lg hover:bg-red-50 transition"
+              >
+                Deactivate
+              </button>
+            </div>
+          </div>
+        ))}
+        {!products.length && (
+          <div className="bg-white rounded-2xl shadow p-8 text-center text-gray-400">No products yet.</div>
+        )}
       </div>
     </div>
   );
