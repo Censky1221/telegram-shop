@@ -631,6 +631,24 @@ module.exports = function registerHandlers(bot, tenant) {
   // ── Cancel & Back ─────────────────────────────────────────
   bot.action('cancel_buy', async (ctx) => {
     try { await ctx.answerCbQuery('Dibatalkan'); } catch {}
+
+    // Hapus pesanan pending dari database
+    try {
+      const telegramId = ctx.from.id.toString();
+      const { rows: [user] } = await pool.query(
+        'SELECT id FROM users WHERE telegram_id=$1 AND tenant_id=$2',
+        [telegramId, tenantId]
+      );
+      if (user) {
+        await pool.query(
+          `DELETE FROM orders WHERE user_id=$1 AND tenant_id=$2 AND status='pending'`,
+          [user.id, tenantId]
+        );
+      }
+    } catch (err) {
+      console.error('cancel_buy delete error:', err.message);
+    }
+
     await ctx.deleteMessage().catch(() => {});
   });
 
