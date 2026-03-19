@@ -1,53 +1,46 @@
 const { pool } = require('../db/pool');
 
-// JANGAN require bot di sini — menyebabkan circular dependency!
-
-/**
- * Atomically assigns one stock item to an order and sends credentials to user.
- * Uses PostgreSQL FOR UPDATE SKIP LOCKED to prevent race conditions.
- *
- * @param {object} order - The order row from DB
- */
-async function assignStockAndDeliver(order) {
+async function assignStockAndDeliver(order, tenantId) {
+  // Gunakan tenant_id dari order jika tidak di-pass
+  const tid = tenantId || order.tenant_id;
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    // 1. Lock one available stock row — SKIP LOCKED prevents double-assignment
+    // 1. Lock satu stock available
     const { rows: [stock] } = await client.query(
       `SELECT id, email, password
        FROM stocks
        WHERE product_id = $1
          AND status = 'available'
+         AND tenant_id = $2
        ORDER BY id ASC
        LIMIT 1
        FOR UPDATE SKIP LOCKED`,
-      [order.product_id]
+      [order.product_id, tid]
     );
 
     if (!stock) {
       await client.query('ROLLBACK');
-      console.error(`OUT OF STOCK: Order #${order.id} paid but no stock left for product #${order.product_id}`);
-      await notifyAdminOutOfStock(order);
+      console.error(`OUT OF STOCK: Order #${order.id} paid but no stock for product #${order.product_id} tenant #${tid}`);
+      await notifyAdminOutOfStock(order, tid);
       return { success: false, reason: 'out_of_stock' };
     }
 
-    // 2. Mark stock as sold and link to this order
+    // 2. Mark stock as sold
     await client.query(
       `UPDATE stocks SET status = 'sold', order_id = $1 WHERE id = $2`,
       [order.id, stock.id]
     );
 
-    // 3. Mark order as paid, record stock assignment and timestamp
+    // 3. Mark order as paid
     await client.query(
-      `UPDATE orders
-       SET status = 'paid', stock_id = $1, paid_at = NOW()
-       WHERE id = $2`,
+      `UPDATE orders SET status = 'paid', stock_id = $1, paid_at = NOW() WHERE id = $2`,
       [stock.id, order.id]
     );
 
-    // 4. Fetch user telegram_id + product name (needed for delivery)
+    // 4. Fetch telegram_id & product name
     const { rows: [info] } = await client.query(
       `SELECT u.telegram_id, p.name AS product_name
        FROM users u
@@ -57,12 +50,12 @@ async function assignStockAndDeliver(order) {
       [order.id]
     );
 
-    // 5. Commit BEFORE sending message (don't hold transaction while calling Telegram)
+    // 5. Commit dulu sebelum kirim pesan
     await client.query('COMMIT');
 
-    // 6. Deliver credentials via Telegram
+    // 6. Kirim credentials via bot tenant
     if (info) {
-      await deliverCredentials(info.telegram_id, info.product_name, stock);
+      await deliverCredentials(info.telegram_id, info.product_name, stock, tid);
     }
 
     return { success: true };
@@ -76,12 +69,14 @@ async function assignStockAndDeliver(order) {
   }
 }
 
-/**
- * Send account credentials to the buyer via Telegram
- */
-async function deliverCredentials(telegramId, productName, stock) {
-  // Require bot di dalam function untuk hindari circular dependency
-  const bot = require('../bot');
+async function deliverCredentials(telegramId, productName, stock, tenantId) {
+  const { getBotByTenantId } = require('../bot/tenantManager');
+  const bot = getBotByTenantId(tenantId);
+
+  if (!bot) {
+    console.error(`Bot not found for tenant #${tenantId}`);
+    return;
+  }
 
   const message =
     `🎉 *Pembayaran Berhasil!*\n\n` +
@@ -89,7 +84,7 @@ async function deliverCredentials(telegramId, productName, stock) {
     `📦 Produk: *${productName}*\n\n` +
     `─────────────────\n` +
     `📧 Email   : \`${stock.email}\`\n` +
-    `🔑 Password: \`${stock.password}\`\n` +
+    `🔐 Password: \`${stock.password}\`\n` +
     `─────────────────\n\n` +
     `⚠️ *Penting:*\n` +
     `• Ganti password setelah login pertama\n` +
@@ -97,27 +92,23 @@ async function deliverCredentials(telegramId, productName, stock) {
     `• Kami tidak dapat mengirim ulang kredensial ini\n\n` +
     `Terima kasih telah berbelanja! 🙏`;
 
-  await bot.telegram.sendMessage(telegramId, message, {
-    parse_mode: 'Markdown',
-  });
+  await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
 }
 
-/**
- * Alert admin when a paid order has no stock to fulfill
- */
-async function notifyAdminOutOfStock(order) {
-  // Require bot di dalam function untuk hindari circular dependency
-  const bot = require('../bot');
+async function notifyAdminOutOfStock(order, tenantId) {
+  const { getBotByTenantId } = require('../bot/tenantManager');
+  const bot = getBotByTenantId(tenantId);
+  if (!bot) return;
 
+  // Ambil admin telegram ID dari tenant (opsional)
   const adminId = process.env.ADMIN_TELEGRAM_ID;
   if (!adminId) return;
 
   await bot.telegram.sendMessage(
     adminId,
-    `⚠️ *STOK HABIS - PERLU TINDAKAN!*\n\n` +
-    `Order #${order.id} telah dibayar (ID: \`${order.payment_id}\`)\n` +
-    `tapi produk #${order.product_id} tidak memiliki stok!\n\n` +
-    `Tambah stok segera dan kirim akun secara manual.`,
+    `⚠️ *STOK HABIS!*\n\n` +
+    `Order #${order.id} telah dibayar tapi produk #${order.product_id} tidak punya stok!\n\n` +
+    `Tambah stok segera.`,
     { parse_mode: 'Markdown' }
   );
 }

@@ -1,73 +1,116 @@
-const axios = require('axios');
+const axios  = require('axios');
 const crypto = require('crypto');
-require('dotenv').config();
 
-const TRIPAY_API_KEY     = process.env.TRIPAY_API_KEY;
-const TRIPAY_PRIVATE_KEY = process.env.TRIPAY_PRIVATE_KEY;
-const TRIPAY_MERCHANT    = process.env.TRIPAY_MERCHANT_CODE;
-const IS_SANDBOX         = process.env.TRIPAY_MODE !== 'production';
+const TRIPAY_SANDBOX_URL    = 'https://tripay.co.id/api-sandbox';
+const TRIPAY_PRODUCTION_URL = 'https://tripay.co.id/api';
+const PAKASIR_URL           = 'https://app.pakasir.com/api';
 
-const BASE_URL = IS_SANDBOX
-  ? 'https://tripay.co.id/api-sandbox'
-  : 'https://tripay.co.id/api';
-
-async function createPayment({ orderId, amount, productName, customerName }) {
+/**
+ * Buat transaksi Tripay
+ */
+async function createTripayPayment(config, { orderId, amount, productName, customerName }) {
+  const { api_key, private_key, merchant_code, mode } = config;
+  const BASE_URL  = mode === 'production' ? TRIPAY_PRODUCTION_URL : TRIPAY_SANDBOX_URL;
   const amountInt = parseInt(amount);
 
-  // Signature: HMAC-SHA256(merchantCode + merchantRef + amount, privateKey)
   const signature = crypto
-    .createHmac('sha256', TRIPAY_PRIVATE_KEY)
-    .update(`${TRIPAY_MERCHANT}${orderId}${amountInt}`)
+    .createHmac('sha256', private_key)
+    .update(`${merchant_code}${orderId}${amountInt}`)
     .digest('hex');
 
-  const expiredTime = Math.floor(Date.now() / 1000) + (2 * 60 * 60);
-
   const payload = {
-    method         : 'QRIS2',
-    merchant_ref   : orderId,
-    amount         : amountInt,
-    customer_name  : customerName.substring(0, 50),
-    customer_email : 'customer@example.com',
-    customer_phone : '081234567890',
-    order_items    : [
-      {
-        sku      : orderId,
-        name     : productName.substring(0, 50),
-        price    : amountInt,
-        quantity : 1,
-      },
-    ],
-    expired_time : expiredTime,
-    signature    : signature,
+    method        : 'QRIS2',
+    merchant_ref  : orderId,
+    amount        : amountInt,
+    customer_name : customerName.substring(0, 50),
+    customer_email: 'customer@example.com',
+    customer_phone: '081234567890',
+    order_items   : [{ sku: orderId, name: productName.substring(0, 50), price: amountInt, quantity: 1 }],
+    expired_time  : Math.floor(Date.now() / 1000) + (2 * 60 * 60),
+    signature,
   };
 
-  console.log('Tripay signature input:', `${TRIPAY_MERCHANT}${orderId}${amountInt}`);
-  console.log('Tripay signature:', signature);
+  const response = await axios.post(`${BASE_URL}/transaction/create`, payload, {
+    headers: { Authorization: `Bearer ${api_key}`, 'Content-Type': 'application/json' }
+  });
 
-  try {
-    const response = await axios.post(
-      `${BASE_URL}/transaction/create`,
-      payload,
-      {
-        headers: {
-          Authorization : `Bearer ${TRIPAY_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    if (!response.data.success) {
-      console.error('Tripay error response:', response.data);
-      throw new Error(response.data.message || 'Tripay payment creation failed');
-    }
-
-    return response.data.data.checkout_url;
-  } catch (err) {
-    if (err.response) {
-      console.error('Tripay API error:', err.response.data);
-    }
-    throw err;
-  }
+  if (!response.data.success) throw new Error(response.data.message || 'Tripay error');
+  return { payment_url: response.data.data.checkout_url, gateway: 'tripay' };
 }
 
-module.exports = { createPayment };
+/**
+ * Buat transaksi Pakasir (QRIS)
+ * Response berisi payment_number (string QRIS) + expired_at
+ */
+async function createPakasirPayment(config, { orderId, amount }) {
+  const { api_key, project_slug } = config;
+  const amountInt = parseInt(amount);
+
+  const payload = {
+    project : project_slug,
+    order_id: orderId,
+    amount  : amountInt,
+    api_key,
+  };
+
+  console.log('Pakasir createPayment payload:', JSON.stringify(payload));
+
+  const response = await axios.post(
+    `${PAKASIR_URL}/transactioncreate/qris`,
+    payload,
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  console.log('Pakasir createPayment response:', JSON.stringify(response.data));
+
+  if (!response.data?.payment) {
+    throw new Error('Pakasir: gagal buat transaksi - ' + JSON.stringify(response.data));
+  }
+
+  const { payment_number, total_payment, expired_at } = response.data.payment;
+
+  return {
+    payment_url   : null,      // Pakasir tidak punya checkout URL
+    payment_number,            // string QRIS — dikirim ke user untuk di-paste
+    total_payment,
+    expired_at,
+    gateway       : 'pakasir',
+  };
+}
+
+/**
+ * Cek status transaksi Pakasir
+ */
+async function checkPakasirPayment(config, { orderId }) {
+  const { api_key, project_slug } = config;
+
+  const payload = {
+    project : project_slug,
+    order_id: orderId,
+    api_key,
+  };
+
+  console.log('Pakasir checkPayment payload:', JSON.stringify(payload));
+
+  const response = await axios.post(
+    `${PAKASIR_URL}/transactioncheck`,
+    payload,
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  console.log('Pakasir checkPayment response:', JSON.stringify(response.data));
+
+  return response.data;
+}
+
+/**
+ * Entry point — pilih gateway berdasarkan config tenant
+ */
+async function createPayment(config, orderData) {
+  if (config.gateway === 'pakasir') {
+    return createPakasirPayment(config, orderData);
+  }
+  return createTripayPayment(config, orderData);
+}
+
+module.exports = { createPayment, createTripayPayment, createPakasirPayment, checkPakasirPayment };
