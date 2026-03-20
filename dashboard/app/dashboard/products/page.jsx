@@ -43,10 +43,10 @@ export default function ProductsPage() {
   }
 
   async function handleHapus(id, available) {
-    if (parseInt(available) > 0) {
-      return alert(`❌ Tidak bisa dihapus!\n\nMasih ada ${available} stok tersedia.\nKosongkan stok terlebih dahulu.`);
-    }
-    if (!confirm('HAPUS PERMANEN produk ini? Tindakan ini tidak bisa dibatalkan!')) return;
+  const pesanKonfirmasi = parseInt(available) > 0
+    ? `HAPUS PERMANEN produk ini?\n\nMasih ada ${available} stok yang akan ikut terhapus!`
+    : `HAPUS PERMANEN produk ini? Tindakan ini tidak bisa dibatalkan!`;
+  if (!confirm(pesanKonfirmasi)) return;
     const res  = await fetch(`${API}/api/admin/products/${id}/destroy`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) return alert(`❌ ${data.error}`);

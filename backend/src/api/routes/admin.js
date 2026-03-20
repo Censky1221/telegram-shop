@@ -117,16 +117,6 @@ router.delete('/products/:id', authMiddleware, async (req, res) => {
 // ── Hapus permanen produk (hanya jika stok = 0) ───────────────────
 router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
   try {
-    const { rows: [sc] } = await pool.query(
-      `SELECT COUNT(*) AS cnt FROM stocks
-       WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
-      [req.params.id, req.admin.tenant_id]
-    );
-    if (parseInt(sc.cnt) > 0) {
-      return res.status(400).json({
-        error: `Tidak bisa dihapus! Masih ada ${sc.cnt} stok tersedia. Kosongkan stok terlebih dahulu.`
-      });
-    }
     await pool.query(`DELETE FROM stocks WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
     await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
     res.json({ message: 'Product deleted permanently' });
