@@ -271,4 +271,36 @@ router.put('/settings', authMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
+// ── Broadcast ─────────────────────────────────────────────────────
+router.post('/broadcast', authMiddleware, async (req, res) => {
+  const { message } = req.body;
+  if (!message) return res.status(400).json({ error: 'Message required' });
+
+  try {
+    const { rows: users } = await pool.query(
+      `SELECT telegram_id FROM users WHERE tenant_id=$1`,
+      [req.admin.tenant_id]
+    );
+
+    const { getBotByTenantId } = require('../../bot/tenantManager');
+    const bot = getBotByTenantId(req.admin.tenant_id);
+    if (!bot) return res.status(500).json({ error: 'Bot tidak ditemukan.' });
+
+    let sent = 0, failed = 0;
+    for (const user of users) {
+      try {
+        await bot.telegram.sendMessage(user.telegram_id, message, { parse_mode: 'Markdown' });
+        sent++;
+      } catch {
+        failed++;
+      }
+    }
+
+    res.json({ success: true, sent, failed, total: users.length });
+  } catch (err) {
+    console.error('broadcast error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
