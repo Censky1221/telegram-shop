@@ -256,17 +256,17 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
 // ── Settings (Banner + S&K) ───────────────────────────────────────
 router.get('/settings', authMiddleware, async (req, res) => {
   const { rows: [tenant] } = await pool.query(
-    `SELECT banner_file_id, terms FROM tenants WHERE id=$1`,
+    `SELECT banner_file_id, terms, help_text FROM tenants WHERE id=$1`,
     [req.admin.tenant_id]
   );
   res.json(tenant || {});
 });
 
 router.put('/settings', authMiddleware, async (req, res) => {
-  const { banner_file_id, terms } = req.body;
+  const { banner_file_id, terms, help_text } = req.body;
   await pool.query(
-    `UPDATE tenants SET banner_file_id=$1, terms=$2 WHERE id=$3`,
-    [banner_file_id || null, terms || null, req.admin.tenant_id]
+    `UPDATE tenants SET banner_file_id=$1, terms=$2, help_text=$3 WHERE id=$4`,
+    [banner_file_id || null, terms || null, help_text || null, req.admin.tenant_id]
   );
   res.json({ success: true });
 });

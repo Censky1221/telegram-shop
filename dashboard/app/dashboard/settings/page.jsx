@@ -12,7 +12,7 @@ function authHeaders() {
 
 export default function SettingsPage() {
   const [bannerFileId, setBannerFileId] = useState('');
-  const [terms, setTerms]               = useState('');
+  const [helpText, setHelpText]         = useState('');
   const [saving, setSaving]             = useState(false);
   const [saved, setSaved]               = useState(false);
 
@@ -22,7 +22,7 @@ export default function SettingsPage() {
     const res  = await fetch(`${API}/api/admin/settings`, { headers: authHeaders() });
     const data = await res.json();
     setBannerFileId(data.banner_file_id || '');
-    setTerms(data.terms || '');
+    setHelpText(data.help_text || '');
   }
 
   async function handleSave() {
@@ -32,7 +32,7 @@ export default function SettingsPage() {
       await fetch(`${API}/api/admin/settings`, {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ banner_file_id: bannerFileId, terms }),
+        body: JSON.stringify({ banner_file_id: bannerFileId, help_text: helpText }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -71,23 +71,23 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* S&K */}
+      {/* Teks Bantuan */}
       <div className="bg-white rounded-2xl shadow p-6 mb-4">
-        <h2 className="font-medium mb-1">📋 Syarat & Ketentuan</h2>
+        <h2 className="font-medium mb-1">📞 Teks Bantuan</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Teks ini akan dikirim ke user setelah berhasil membeli produk, di bawah detail akun.
+          Teks ini ditampilkan saat user menekan tombol <strong>Bantuan</strong> di bot.
         </p>
         <textarea
           className="w-full border rounded-lg px-3 py-2.5 text-sm"
           rows={8}
-          placeholder={`Contoh:\n⚠️ Penting:\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini\n\nTerima kasih telah berbelanja! 🙏`}
-          value={terms}
-          onChange={e => setTerms(e.target.value)}
+          placeholder={`Contoh:\n📞 Bantuan & Support\n\nHubungi admin jika ada masalah.\n\n• Produk dikirim otomatis setelah pembayaran\n• Pembayaran via QRIS\n\n⚠️ Sertakan ID pesanan saat menghubungi admin.\n\n📱 Contact: @username`}
+          value={helpText}
+          onChange={e => setHelpText(e.target.value)}
         />
-        <p className="text-xs text-gray-400 mt-1">Gunakan • untuk poin, baris baru untuk paragraf baru.</p>
+        <p className="text-xs text-gray-400 mt-1">Mendukung format Markdown Telegram: *bold*, _italic_, `code`</p>
       </div>
 
-      {/* Tombol Simpan */}
+      {/* Simpan */}
       <div className="flex items-center gap-3">
         <button
           onClick={handleSave}

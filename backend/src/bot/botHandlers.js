@@ -71,17 +71,22 @@ module.exports = function registerHandlers(bot, tenant) {
   });
 
   // ── Bantuan ───────────────────────────────────────────────
-  bot.hears('📞 Bantuan', (ctx) => {
-    ctx.reply(
+  bot.hears('📞 Bantuan', async (ctx) => {
+  try {
+    const { rows: [t] } = await pool.query(
+      `SELECT help_text FROM tenants WHERE id=$1`, [tenantId]
+    );
+    const text = t?.help_text ||
       `📞 *Bantuan & Support*\n\n` +
       `Hubungi admin ${tenant.name} jika ada masalah.\n\n` +
       `• Produk dikirim otomatis setelah pembayaran\n` +
       `• Pembayaran via QRIS\n\n` +
-      `⚠️ Sertakan ID pesanan saat menghubungi admin.`,
-      { parse_mode: 'Markdown' }
-    );
-  });
-
+      `⚠️ Sertakan ID pesanan saat menghubungi admin.`;
+    ctx.reply(text, { parse_mode: 'Markdown' });
+  } catch {
+    ctx.reply('Gagal memuat bantuan.');
+  }
+});
   // ── Daftar Produk ─────────────────────────────────────────
   bot.hears('🛍 Daftar Produk', (ctx) => showProductList(ctx, 1));
 
