@@ -29,7 +29,11 @@ export default function ProductsPage() {
     try {
       const url    = editing ? `${API}/api/admin/products/${editing}` : `${API}/api/admin/products`;
       const method = editing ? 'PUT' : 'POST';
-      await fetch(url, { method, headers: authHeaders(), body: JSON.stringify({ ...form, price: parseInt(form.price) }) });
+      const editingProduct = products.find(p => p.id === editing);
+      const body = editing
+        ? { ...form, price: parseInt(form.price), is_active: editingProduct?.is_active ?? true }
+        : { ...form, price: parseInt(form.price) };
+      await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(body) });
       setForm({ name: '', description: '', price: '' });
       setEditing(null);
       await fetchProducts();
