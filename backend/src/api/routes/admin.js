@@ -114,6 +114,27 @@ router.delete('/products/:id', authMiddleware, async (req, res) => {
   res.json({ message: 'Product deactivated' });
 });
 
+// ── Hapus permanen produk (hanya jika stok = 0) ───────────────────
+router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
+  try {
+    const { rows: [sc] } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM stocks
+       WHERE product_id=$1 AND tenant_id=$2 AND status='available'`,
+      [req.params.id, req.admin.tenant_id]
+    );
+    if (parseInt(sc.cnt) > 0) {
+      return res.status(400).json({
+        error: `Tidak bisa dihapus! Masih ada ${sc.cnt} stok tersedia. Kosongkan stok terlebih dahulu.`
+      });
+    }
+    await pool.query(`DELETE FROM stocks WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    res.json({ message: 'Product deleted permanently' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Stocks ────────────────────────────────────────────────────────
 router.get('/stocks/:productId', authMiddleware, async (req, res) => {
   const { rows } = await pool.query(
@@ -242,29 +263,20 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
   }
 });
 
-// Hapus permanen produk + stoknya
-router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
-  try {
-    await pool.query(`DELETE FROM stocks WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
-    await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
-    res.json({ message: 'Product deleted permanently' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
+// ── Settings (Banner + S&K) ───────────────────────────────────────
 router.get('/settings', authMiddleware, async (req, res) => {
   const { rows: [tenant] } = await pool.query(
-    `SELECT banner_file_id FROM tenants WHERE id=$1`, [req.admin.tenant_id]
+    `SELECT banner_file_id, terms FROM tenants WHERE id=$1`,
+    [req.admin.tenant_id]
   );
   res.json(tenant || {});
 });
 
 router.put('/settings', authMiddleware, async (req, res) => {
-  const { banner_file_id } = req.body;
+  const { banner_file_id, terms } = req.body;
   await pool.query(
-    `UPDATE tenants SET banner_file_id=$1 WHERE id=$2`,
-    [banner_file_id || null, req.admin.tenant_id]
+    `UPDATE tenants SET banner_file_id=$1, terms=$2 WHERE id=$3`,
+    [banner_file_id || null, terms || null, req.admin.tenant_id]
   );
   res.json({ success: true });
 });

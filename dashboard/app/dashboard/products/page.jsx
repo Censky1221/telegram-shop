@@ -42,9 +42,14 @@ export default function ProductsPage() {
     fetchProducts();
   }
 
-  async function handleHapus(id) {
-    if (!confirm('HAPUS PERMANEN produk ini? Semua stok terkait juga akan dihapus!')) return;
-    await fetch(`${API}/api/admin/products/${id}/destroy`, { method: 'DELETE', headers: authHeaders() });
+  async function handleHapus(id, available) {
+    if (parseInt(available) > 0) {
+      return alert(`❌ Tidak bisa dihapus!\n\nMasih ada ${available} stok tersedia.\nKosongkan stok terlebih dahulu.`);
+    }
+    if (!confirm('HAPUS PERMANEN produk ini? Tindakan ini tidak bisa dibatalkan!')) return;
+    const res  = await fetch(`${API}/api/admin/products/${id}/destroy`, { method: 'DELETE', headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) return alert(`❌ ${data.error}`);
     fetchProducts();
   }
 
@@ -128,10 +133,16 @@ export default function ProductsPage() {
                     {p.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
-                <td className="px-4 py-3 flex gap-2">
+                <td className="px-4 py-3 flex gap-2 items-center">
                   <button onClick={() => startEdit(p)} className="text-blue-600 hover:underline text-xs">Edit</button>
                   <button onClick={() => handleDeactivate(p.id)} className="text-yellow-600 hover:underline text-xs">Nonaktifkan</button>
-                  <button onClick={() => handleHapus(p.id)} className="text-red-500 hover:underline text-xs">Hapus</button>
+                  <button
+                    onClick={() => handleHapus(p.id, p.available)}
+                    className={`text-xs ${parseInt(p.available) > 0 ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:underline'}`}
+                    title={parseInt(p.available) > 0 ? `Masih ada ${p.available} stok` : 'Hapus permanen'}
+                  >
+                    Hapus
+                  </button>
                 </td>
               </tr>
             ))}
@@ -176,12 +187,21 @@ export default function ProductsPage() {
                 Nonaktifkan
               </button>
               <button
-                onClick={() => handleHapus(p.id)}
-                className="flex-1 text-center text-sm text-red-500 border border-red-200 py-1.5 rounded-lg hover:bg-red-50 transition"
+                onClick={() => handleHapus(p.id, p.available)}
+                className={`flex-1 text-center text-sm py-1.5 rounded-lg transition border ${
+                  parseInt(p.available) > 0
+                    ? 'text-gray-300 border-gray-100 cursor-not-allowed'
+                    : 'text-red-500 border-red-200 hover:bg-red-50'
+                }`}
               >
                 Hapus
               </button>
             </div>
+            {parseInt(p.available) > 0 && (
+              <p className="text-xs text-orange-500 mt-2 text-center">
+                ⚠️ Tidak bisa dihapus — stok masih {p.available}
+              </p>
+            )}
           </div>
         ))}
         {!products.length && (

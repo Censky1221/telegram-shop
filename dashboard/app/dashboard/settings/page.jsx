@@ -12,6 +12,7 @@ function authHeaders() {
 
 export default function SettingsPage() {
   const [bannerFileId, setBannerFileId] = useState('');
+  const [terms, setTerms]               = useState('');
   const [saving, setSaving]             = useState(false);
   const [saved, setSaved]               = useState(false);
 
@@ -21,6 +22,7 @@ export default function SettingsPage() {
     const res  = await fetch(`${API}/api/admin/settings`, { headers: authHeaders() });
     const data = await res.json();
     setBannerFileId(data.banner_file_id || '');
+    setTerms(data.terms || '');
   }
 
   async function handleSave() {
@@ -30,81 +32,71 @@ export default function SettingsPage() {
       await fetch(`${API}/api/admin/settings`, {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ banner_file_id: bannerFileId }),
+        body: JSON.stringify({ banner_file_id: bannerFileId, terms }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } finally { setSaving(false); }
   }
 
-  async function handleRemove() {
-    if (!confirm('Hapus banner?')) return;
-    setBannerFileId('');
-    await fetch(`${API}/api/admin/settings`, {
-      method: 'PUT',
-      headers: authHeaders(),
-      body: JSON.stringify({ banner_file_id: '' }),
-    });
-  }
-
   return (
     <div>
       <h1 className="text-xl md:text-2xl font-semibold mb-1">⚙️ Settings</h1>
-      <p className="text-gray-500 text-sm mb-6">Pengaturan tampilan bot kamu.</p>
+      <p className="text-gray-500 text-sm mb-6">Pengaturan tampilan dan teks bot kamu.</p>
 
+      {/* Banner */}
       <div className="bg-white rounded-2xl shadow p-6 mb-4">
         <h2 className="font-medium mb-1">🖼️ Banner Daftar Produk</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Banner ini akan muncul setiap kali user membuka daftar produk di bot.<br />
-          Cara mendapatkan File ID:
+          Gambar ini muncul saat user membuka daftar produk di bot.
         </p>
-
         <ol className="text-sm text-gray-600 mb-4 space-y-1 list-decimal list-inside bg-gray-50 rounded-lg p-4">
           <li>Kirim gambar banner ke bot kamu di Telegram</li>
-          <li>Ketik <code className="bg-gray-200 px-1 rounded">/fileid</code> setelah kirim gambar</li>
-          <li>Bot akan membalas dengan File ID gambar tersebut</li>
-          <li>Copy File ID dan paste di bawah</li>
+          <li>Reply gambar itu lalu ketik <code className="bg-gray-200 px-1 rounded">/fileid</code></li>
+          <li>Bot akan balas dengan File ID</li>
+          <li>Copy dan paste di bawah</li>
         </ol>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">File ID Banner</label>
-            <input
-              className="w-full border rounded-lg px-3 py-2.5 text-sm font-mono"
-              placeholder="AgACAgIAAxkBAAI..."
-              value={bannerFileId}
-              onChange={e => setBannerFileId(e.target.value)}
-            />
+        <label className="block text-sm font-medium text-gray-700 mb-1">File ID Banner</label>
+        <input
+          className="w-full border rounded-lg px-3 py-2.5 text-sm font-mono mb-2"
+          placeholder="AgACAgIAAxkBAAI..."
+          value={bannerFileId}
+          onChange={e => setBannerFileId(e.target.value)}
+        />
+        {bannerFileId && (
+          <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700 mb-2">
+            <span>✅ Banner aktif</span>
+            <button onClick={() => setBannerFileId('')} className="text-red-500 hover:underline text-xs">Hapus</button>
           </div>
+        )}
+      </div>
 
-          {bannerFileId && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700">
-              ✅ Banner sudah diset. File ID: <code className="font-mono text-xs break-all">{bannerFileId}</code>
-            </div>
-          )}
+      {/* S&K */}
+      <div className="bg-white rounded-2xl shadow p-6 mb-4">
+        <h2 className="font-medium mb-1">📋 Syarat & Ketentuan</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Teks ini akan dikirim ke user setelah berhasil membeli produk, di bawah detail akun.
+        </p>
+        <textarea
+          className="w-full border rounded-lg px-3 py-2.5 text-sm"
+          rows={8}
+          placeholder={`Contoh:\n⚠️ Penting:\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini\n\nTerima kasih telah berbelanja! 🙏`}
+          value={terms}
+          onChange={e => setTerms(e.target.value)}
+        />
+        <p className="text-xs text-gray-400 mt-1">Gunakan • untuk poin, baris baru untuk paragraf baru.</p>
+      </div>
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-5 py-2.5 rounded-lg transition"
-            >
-              {saving ? 'Menyimpan...' : '💾 Simpan'}
-            </button>
-            {bannerFileId && (
-              <button
-                onClick={handleRemove}
-                className="bg-red-50 hover:bg-red-100 text-red-600 text-sm px-5 py-2.5 rounded-lg transition border border-red-200"
-              >
-                🗑️ Hapus Banner
-              </button>
-            )}
-          </div>
-
-          {saved && (
-            <div className="text-green-600 text-sm font-medium">✅ Berhasil disimpan!</div>
-          )}
-        </div>
+      {/* Tombol Simpan */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm px-6 py-2.5 rounded-lg transition"
+        >
+          {saving ? 'Menyimpan...' : '💾 Simpan Semua'}
+        </button>
+        {saved && <span className="text-green-600 text-sm font-medium">✅ Berhasil disimpan!</span>}
       </div>
     </div>
   );
