@@ -72,21 +72,22 @@ module.exports = function registerHandlers(bot, tenant) {
 
   // ── Bantuan ───────────────────────────────────────────────
   bot.hears('📞 Bantuan', async (ctx) => {
-  try {
-    const { rows: [t] } = await pool.query(
-      `SELECT help_text FROM tenants WHERE id=$1`, [tenantId]
-    );
-    const text = t?.help_text ||
-      `📞 *Bantuan & Support*\n\n` +
-      `Hubungi admin ${tenant.name} jika ada masalah.\n\n` +
-      `• Produk dikirim otomatis setelah pembayaran\n` +
-      `• Pembayaran via QRIS\n\n` +
-      `⚠️ Sertakan ID pesanan saat menghubungi admin.`;
-    ctx.reply(text, { parse_mode: 'Markdown' });
-  } catch {
-    ctx.reply('Gagal memuat bantuan.');
-  }
-});
+    try {
+      const { rows: [t] } = await pool.query(
+        `SELECT help_text FROM tenants WHERE id=$1`, [tenantId]
+      );
+      const text = t?.help_text ||
+        `📞 *Bantuan & Support*\n\n` +
+        `Hubungi admin ${tenant.name} jika ada masalah.\n\n` +
+        `• Produk dikirim otomatis setelah pembayaran\n` +
+        `• Pembayaran via QRIS\n\n` +
+        `⚠️ Sertakan ID pesanan saat menghubungi admin.`;
+      ctx.reply(text, { parse_mode: 'Markdown' });
+    } catch {
+      ctx.reply('Gagal memuat bantuan.');
+    }
+  });
+
   // ── Daftar Produk ─────────────────────────────────────────
   bot.hears('🛍 Daftar Produk', (ctx) => showProductList(ctx, 1));
 
@@ -622,7 +623,6 @@ module.exports = function registerHandlers(bot, tenant) {
         `╰ - - - - - - - - - - - - - - - - ╯\n\n` +
         `_Ketik nomor untuk melihat detail._`;
 
-      // Ambil banner dari database
       const { rows: [tenantData] } = await pool.query(
         `SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]
       );
@@ -651,7 +651,8 @@ module.exports = function registerHandlers(bot, tenant) {
     try {
       const { rows: [product] } = await pool.query(
         `SELECT p.*,
-                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+                COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
+                COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
          FROM products p
          LEFT JOIN stocks s ON s.product_id = p.id
          WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true
@@ -661,6 +662,7 @@ module.exports = function registerHandlers(bot, tenant) {
       if (!product) return ctx.reply('Produk tidak ditemukan.');
 
       const stock   = parseInt(product.stock_count);
+      const sold    = parseInt(product.sold_count || 0);
       const inStock = stock > 0;
       const cartKey = `${tenantId}_${ctx.from.id}`;
       userCart[cartKey] = { productId, qty };
@@ -671,6 +673,7 @@ module.exports = function registerHandlers(bot, tenant) {
         `━━━━━━━━━━━━━━━━━━━━\n` +
         `💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n` +
         `📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n` +
+        `📊 Terjual: *${sold}*\n` +
         `━━━━━━━━━━━━━━━━━━━━\n\n` +
         `Atur jumlah lalu tekan *Beli Sekarang*`;
 
