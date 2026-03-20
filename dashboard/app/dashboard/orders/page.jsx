@@ -17,18 +17,41 @@ const STATUS_STYLE = {
 };
 
 export default function OrdersPage() {
-  const [orders, setOrders] = useState([]);
-  const [filter, setFilter] = useState('');
+  const [orders, setOrders]   = useState([]);
+  const [filter, setFilter]   = useState('');
+  const [search, setSearch]   = useState('');
   const [loading, setLoading] = useState(true);
+  const [detail, setDetail]   = useState(null);
 
   useEffect(() => { fetchOrders(); }, [filter]);
 
   async function fetchOrders() {
     setLoading(true);
+    setSearch('');
+    setDetail(null);
     try {
-      const qs = filter ? `?status=${filter}` : '';
+      const qs  = filter ? `?status=${filter}` : '';
       const res = await fetch(`${API}/api/admin/orders${qs}`, { headers: authHeaders() });
       setOrders(await res.json());
+    } finally { setLoading(false); }
+  }
+
+  async function handleSearch() {
+    if (!search.trim()) return fetchOrders();
+    setLoading(true);
+    setDetail(null);
+    try {
+      const res  = await fetch(`${API}/api/admin/orders/search?id=${search.trim()}`, { headers: authHeaders() });
+      const data = await res.json();
+      if (data.error) {
+        setOrders([]);
+        setDetail(null);
+      } else if (Array.isArray(data)) {
+        setOrders(data);
+      } else {
+        setOrders([data]);
+        setDetail(data);
+      }
     } finally { setLoading(false); }
   }
 
@@ -50,6 +73,54 @@ export default function OrdersPage() {
           </div>
         ))}
       </div>
+
+      {/* Search by ID */}
+      <div className="bg-white rounded-2xl shadow p-4 mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">🔍 Cari by ID Pesanan</label>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 border rounded-lg px-3 py-2 text-sm"
+            placeholder="Masukkan ID pesanan (contoh: 42)"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSearch()}
+          />
+          <button
+            onClick={handleSearch}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition"
+          >
+            Cari
+          </button>
+          {search && (
+            <button
+              onClick={() => { setSearch(''); fetchOrders(); }}
+              className="bg-gray-200 hover:bg-gray-300 text-sm px-4 py-2 rounded-lg transition"
+            >
+              Reset
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Detail pesanan jika ditemukan by ID */}
+      {detail && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 mb-4 text-sm">
+          <p className="font-semibold text-blue-800 mb-2">📋 Detail Pesanan #{detail.id}</p>
+          <div className="grid grid-cols-2 gap-2 text-blue-700">
+            <div><span className="text-blue-500">Produk:</span> {detail.product_name}</div>
+            <div><span className="text-blue-500">User:</span> {detail.telegram_username ? `@${detail.telegram_username}` : `#${detail.telegram_id}`}</div>
+            <div><span className="text-blue-500">Total:</span> Rp {Number(detail.amount).toLocaleString('id-ID')}</div>
+            <div><span className="text-blue-500">Status:</span>
+              <span className={`ml-1 px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLE[detail.status] || ''}`}>
+                {detail.status}
+              </span>
+            </div>
+            <div><span className="text-blue-500">Payment ID:</span> <span className="font-mono text-xs">{detail.payment_id}</span></div>
+            <div><span className="text-blue-500">Tanggal:</span> {new Date(detail.created_at).toLocaleString('id-ID')}</div>
+            {detail.paid_at && <div><span className="text-blue-500">Dibayar:</span> {new Date(detail.paid_at).toLocaleString('id-ID')}</div>}
+          </div>
+        </div>
+      )}
 
       {/* Filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -83,8 +154,8 @@ export default function OrdersPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {orders.map(o => (
-                <tr key={o.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500">#{o.id}</td>
+                <tr key={o.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setDetail(o)}>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 font-semibold">#{o.id}</td>
                   <td className="px-4 py-3 font-medium">{o.product_name}</td>
                   <td className="px-4 py-3 text-gray-500">
                     {o.telegram_username ? `@${o.telegram_username}` : `#${o.telegram_id}`}
@@ -107,6 +178,7 @@ export default function OrdersPage() {
           </table>
         )}
       </div>
+      <p className="text-xs text-gray-400 mt-2 text-center">Klik baris untuk melihat detail pesanan.</p>
     </div>
   );
 }

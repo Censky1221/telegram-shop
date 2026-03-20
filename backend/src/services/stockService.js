@@ -66,7 +66,7 @@ async function assignStockAndDeliver(order, tenantId) {
     await client.query('COMMIT');
 
     if (info) {
-      await deliverCredentials(info.telegram_id, info.product_name, info.variant_name, info.product_terms, stock, tid);
+      await deliverCredentials(info.telegram_id, info.product_name, info.variant_name, info.product_terms, stock, order.id, tid);
     }
 
     return { success: true };
@@ -80,7 +80,7 @@ async function assignStockAndDeliver(order, tenantId) {
   }
 }
 
-async function deliverCredentials(telegramId, productName, variantName, productTerms, stock, tenantId) {
+async function deliverCredentials(telegramId, productName, variantName, productTerms, stock, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
   if (!bot) {
@@ -90,7 +90,6 @@ async function deliverCredentials(telegramId, productName, variantName, productT
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
 
-  // Gunakan S&K dari produk jika ada, fallback ke default
   const termsText = productTerms
     ? productTerms
     : `⚠️ *Penting:*\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini`;
@@ -98,7 +97,8 @@ async function deliverCredentials(telegramId, productName, variantName, productT
   const message =
     `🎉 *Pembayaran Berhasil!*\n\n` +
     `Terima kasih atas pembelian Anda.\n\n` +
-    `📦 Produk: *${prodLabel}*\n\n` +
+    `📦 Produk: *${prodLabel}*\n` +
+    `🧾 ID Pesanan: *#${orderId}*\n\n` +
     `─────────────────\n` +
     `📧 Email   : \`${stock.email}\`\n` +
     `🔐 Password: \`${stock.password}\`\n` +

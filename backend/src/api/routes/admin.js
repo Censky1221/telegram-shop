@@ -156,6 +156,28 @@ router.post('/stocks/upload', authMiddleware, async (req, res) => {
   res.json({ inserted: result.rowCount });
 });
 
+// Search order by ID
+router.get('/orders/search', authMiddleware, async (req, res) => {
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: 'ID required' });
+  try {
+    const { rows: [order] } = await pool.query(
+      `SELECT o.id, o.amount, o.status, o.payment_id, o.created_at, o.paid_at,
+              p.name AS product_name,
+              u.username AS telegram_username, u.telegram_id
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+       JOIN users u ON u.id = o.user_id
+       WHERE o.id=$1 AND o.tenant_id=$2`,
+      [id, req.admin.tenant_id]
+    );
+    if (!order) return res.status(404).json({ error: 'Pesanan tidak ditemukan.' });
+    res.json(order);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Orders ────────────────────────────────────────────────────────
 router.get('/orders', authMiddleware, async (req, res) => {
   const { status, page = 1 } = req.query;
