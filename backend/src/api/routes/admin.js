@@ -86,21 +86,21 @@ router.get('/products', authMiddleware, async (req, res) => {
 });
 
 router.post('/products', authMiddleware, async (req, res) => {
-  const { name, description, price } = req.body;
+  const { name, description, price, terms } = req.body;
   if (!name || !price) return res.status(400).json({ error: 'name and price required' });
   const { rows: [p] } = await pool.query(
-    `INSERT INTO products (name, description, price, tenant_id) VALUES ($1,$2,$3,$4) RETURNING *`,
-    [name, description, price, req.admin.tenant_id]
+    `INSERT INTO products (name, description, price, terms, tenant_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [name, description, price, terms || null, req.admin.tenant_id]
   );
   res.status(201).json(p);
 });
 
 router.put('/products/:id', authMiddleware, async (req, res) => {
-  const { name, description, price, is_active } = req.body;
+  const { name, description, price, is_active, terms } = req.body;
   const { rows: [p] } = await pool.query(
-    `UPDATE products SET name=$1, description=$2, price=$3, is_active=$4
-     WHERE id=$5 AND tenant_id=$6 RETURNING *`,
-    [name, description, price, is_active, req.params.id, req.admin.tenant_id]
+    `UPDATE products SET name=$1, description=$2, price=$3, is_active=$4, terms=$5
+     WHERE id=$6 AND tenant_id=$7 RETURNING *`,
+    [name, description, price, is_active, terms || null, req.params.id, req.admin.tenant_id]
   );
   if (!p) return res.status(404).json({ error: 'Product not found' });
   res.json(p);

@@ -7,7 +7,6 @@ async function assignStockAndDeliver(order, tenantId) {
   try {
     await client.query('BEGIN');
 
-    // Cari stok berdasarkan variant_id jika ada, fallback ke product_id
     const stockQuery = order.variant_id
       ? `SELECT id, email, password
          FROM stocks
@@ -40,22 +39,21 @@ async function assignStockAndDeliver(order, tenantId) {
       return { success: false, reason: 'out_of_stock' };
     }
 
-    // Mark stock sold
     await client.query(
       `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
       [order.id, stock.id]
     );
 
-    // Mark order paid
     await client.query(
       `UPDATE orders SET status='paid', stock_id=$1, paid_at=NOW() WHERE id=$2`,
       [stock.id, order.id]
     );
 
-    // Ambil info user, produk, varian
+    // Ambil info user, produk, varian + terms dari produk
     const { rows: [info] } = await client.query(
       `SELECT u.telegram_id,
               p.name AS product_name,
+              p.terms AS product_terms,
               pv.name AS variant_name
        FROM users u
        JOIN orders o ON o.user_id = u.id
@@ -68,7 +66,7 @@ async function assignStockAndDeliver(order, tenantId) {
     await client.query('COMMIT');
 
     if (info) {
-      await deliverCredentials(info.telegram_id, info.product_name, info.variant_name, stock, tid);
+      await deliverCredentials(info.telegram_id, info.product_name, info.variant_name, info.product_terms, stock, tid);
     }
 
     return { success: true };
@@ -82,7 +80,7 @@ async function assignStockAndDeliver(order, tenantId) {
   }
 }
 
-async function deliverCredentials(telegramId, productName, variantName, stock, tenantId) {
+async function deliverCredentials(telegramId, productName, variantName, productTerms, stock, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
   if (!bot) {
@@ -92,6 +90,11 @@ async function deliverCredentials(telegramId, productName, variantName, stock, t
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
 
+  // Gunakan S&K dari produk jika ada, fallback ke default
+  const termsText = productTerms
+    ? productTerms
+    : `⚠️ *Penting:*\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini`;
+
   const message =
     `🎉 *Pembayaran Berhasil!*\n\n` +
     `Terima kasih atas pembelian Anda.\n\n` +
@@ -100,10 +103,7 @@ async function deliverCredentials(telegramId, productName, variantName, stock, t
     `📧 Email   : \`${stock.email}\`\n` +
     `🔐 Password: \`${stock.password}\`\n` +
     `─────────────────\n\n` +
-    `⚠️ *Penting:*\n` +
-    `• Ganti password setelah login pertama\n` +
-    `• Simpan pesan ini dengan aman\n` +
-    `• Kami tidak dapat mengirim ulang kredensial ini\n\n` +
+    `${termsText}\n\n` +
     `Terima kasih telah berbelanja! 🙏`;
 
   await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });

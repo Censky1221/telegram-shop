@@ -12,7 +12,7 @@ function authHeaders() {
 
 export default function ProductsPage() {
   const [products, setProducts]  = useState([]);
-  const [form, setForm]          = useState({ name: '', description: '', price: '' });
+  const [form, setForm]          = useState({ name: '', description: '', price: '', terms: '' });
   const [editing, setEditing]    = useState(null);
   const [loading, setLoading]    = useState(false);
 
@@ -34,7 +34,7 @@ export default function ProductsPage() {
         ? { ...form, price: parseInt(form.price), is_active: editingProduct?.is_active ?? true }
         : { ...form, price: parseInt(form.price) };
       await fetch(url, { method, headers: authHeaders(), body: JSON.stringify(body) });
-      setForm({ name: '', description: '', price: '' });
+      setForm({ name: '', description: '', price: '', terms: '' });
       setEditing(null);
       await fetchProducts();
     } finally { setLoading(false); }
@@ -47,10 +47,10 @@ export default function ProductsPage() {
   }
 
   async function handleHapus(id, available) {
-  const pesanKonfirmasi = parseInt(available) > 0
-    ? `HAPUS PERMANEN produk ini?\n\nMasih ada ${available} stok yang akan ikut terhapus!`
-    : `HAPUS PERMANEN produk ini? Tindakan ini tidak bisa dibatalkan!`;
-  if (!confirm(pesanKonfirmasi)) return;
+    const pesanKonfirmasi = parseInt(available) > 0
+      ? `HAPUS PERMANEN produk ini?\n\nMasih ada ${available} stok yang akan ikut terhapus!`
+      : `HAPUS PERMANEN produk ini? Tindakan ini tidak bisa dibatalkan!`;
+    if (!confirm(pesanKonfirmasi)) return;
     const res  = await fetch(`${API}/api/admin/products/${id}/destroy`, { method: 'DELETE', headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) return alert(`❌ ${data.error}`);
@@ -59,7 +59,12 @@ export default function ProductsPage() {
 
   function startEdit(p) {
     setEditing(p.id);
-    setForm({ name: p.name, description: p.description || '', price: String(p.price) });
+    setForm({
+      name        : p.name,
+      description : p.description || '',
+      price       : String(p.price),
+      terms       : p.terms || '',
+    });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -91,6 +96,19 @@ export default function ProductsPage() {
             value={form.description}
             onChange={e => setForm({ ...form, description: e.target.value })}
           />
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              📋 Syarat & Ketentuan <span className="text-gray-400">(opsional — dikirim ke user setelah beli)</span>
+            </label>
+            <textarea
+              className="border rounded-lg px-3 py-2.5 text-sm w-full"
+              rows={4}
+              placeholder={`Contoh:\n⚠️ Penting:\n• Ganti password setelah login pertama\n• Jangan share akun\n• Garansi 30 hari`}
+              value={form.terms}
+              onChange={e => setForm({ ...form, terms: e.target.value })}
+            />
+            <p className="text-xs text-gray-400 mt-1">Kosongkan untuk menggunakan S&K default.</p>
+          </div>
         </div>
         <div className="mt-3 flex gap-2 flex-wrap">
           <button
@@ -102,7 +120,7 @@ export default function ProductsPage() {
           </button>
           {editing && (
             <button
-              onClick={() => { setEditing(null); setForm({ name: '', description: '', price: '' }); }}
+              onClick={() => { setEditing(null); setForm({ name: '', description: '', price: '', terms: '' }); }}
               className="bg-gray-200 hover:bg-gray-300 text-sm px-4 py-2.5 rounded-lg transition"
             >
               Cancel
@@ -121,6 +139,7 @@ export default function ProductsPage() {
               <th className="px-4 py-3">Available</th>
               <th className="px-4 py-3">Sold</th>
               <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3">S&K</th>
               <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
@@ -137,21 +156,21 @@ export default function ProductsPage() {
                     {p.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </td>
+                <td className="px-4 py-3">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    p.terms ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
+                    {p.terms ? '✅ Custom' : 'Default'}
+                  </span>
+                </td>
                 <td className="px-4 py-3 flex gap-2 items-center">
                   <button onClick={() => startEdit(p)} className="text-blue-600 hover:underline text-xs">Edit</button>
                   <button onClick={() => handleDeactivate(p.id)} className="text-yellow-600 hover:underline text-xs">Nonaktifkan</button>
-                  <button
-                    onClick={() => handleHapus(p.id, p.available)}
-                    className={`text-xs ${parseInt(p.available) > 0 ? 'text-gray-300 cursor-not-allowed' : 'text-red-500 hover:underline'}`}
-                    title={parseInt(p.available) > 0 ? `Masih ada ${p.available} stok` : 'Hapus permanen'}
-                  >
-                    Hapus
-                  </button>
+                  <button onClick={() => handleHapus(p.id, p.available)} className="text-red-500 hover:underline text-xs">Hapus</button>
                 </td>
               </tr>
             ))}
             {!products.length && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No products yet.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No products yet.</td></tr>
             )}
           </tbody>
         </table>
@@ -168,44 +187,35 @@ export default function ProductsPage() {
                   Rp {Number(p.price).toLocaleString('id-ID')}
                 </p>
               </div>
-              <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
-                p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                {p.is_active ? 'Active' : 'Inactive'}
-              </span>
+              <div className="flex flex-col items-end gap-1">
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  p.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                  {p.is_active ? 'Active' : 'Inactive'}
+                </span>
+                <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${
+                  p.terms ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-400'}`}>
+                  {p.terms ? '📋 Custom S&K' : 'S&K Default'}
+                </span>
+              </div>
             </div>
             <div className="flex gap-4 text-sm text-gray-500 mb-3">
               <span>✅ {p.available} tersedia</span>
               <span>📦 {p.sold} terjual</span>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={() => startEdit(p)}
-                className="flex-1 text-center text-sm text-blue-600 border border-blue-200 py-1.5 rounded-lg hover:bg-blue-50 transition"
-              >
+              <button onClick={() => startEdit(p)}
+                className="flex-1 text-center text-sm text-blue-600 border border-blue-200 py-1.5 rounded-lg hover:bg-blue-50 transition">
                 Edit
               </button>
-              <button
-                onClick={() => handleDeactivate(p.id)}
-                className="flex-1 text-center text-sm text-yellow-600 border border-yellow-200 py-1.5 rounded-lg hover:bg-yellow-50 transition"
-              >
+              <button onClick={() => handleDeactivate(p.id)}
+                className="flex-1 text-center text-sm text-yellow-600 border border-yellow-200 py-1.5 rounded-lg hover:bg-yellow-50 transition">
                 Nonaktifkan
               </button>
-              <button
-                onClick={() => handleHapus(p.id, p.available)}
-                className={`flex-1 text-center text-sm py-1.5 rounded-lg transition border ${
-                  parseInt(p.available) > 0
-                    ? 'text-gray-300 border-gray-100 cursor-not-allowed'
-                    : 'text-red-500 border-red-200 hover:bg-red-50'
-                }`}
-              >
+              <button onClick={() => handleHapus(p.id, p.available)}
+                className="flex-1 text-center text-sm text-red-500 border border-red-200 py-1.5 rounded-lg hover:bg-red-50 transition">
                 Hapus
               </button>
             </div>
-            {parseInt(p.available) > 0 && (
-              <p className="text-xs text-orange-500 mt-2 text-center">
-                ⚠️ Tidak bisa dihapus — stok masih {p.available}
-              </p>
-            )}
           </div>
         ))}
         {!products.length && (
