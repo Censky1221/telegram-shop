@@ -128,7 +128,7 @@ router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
 // ── Stocks ────────────────────────────────────────────────────────
 router.get('/stocks/:productId', authMiddleware, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, email, status, created_at FROM stocks
+    `SELECT id, email, password, status, created_at FROM stocks
      WHERE product_id=$1 AND tenant_id=$2 ORDER BY id DESC`,
     [req.params.productId, req.admin.tenant_id]
   );
@@ -299,6 +299,34 @@ router.post('/broadcast', authMiddleware, async (req, res) => {
     res.json({ success: true, sent, failed, total: users.length });
   } catch (err) {
     console.error('broadcast error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Edit stok
+router.put('/stocks/:id', authMiddleware, async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { rows: [s] } = await pool.query(
+      `UPDATE stocks SET email=$1, password=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [email, password, req.params.id, req.admin.tenant_id]
+    );
+    if (!s) return res.status(404).json({ error: 'Stock not found' });
+    res.json(s);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Hapus stok
+router.delete('/stocks/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(
+      `DELETE FROM stocks WHERE id=$1 AND tenant_id=$2`,
+      [req.params.id, req.admin.tenant_id]
+    );
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

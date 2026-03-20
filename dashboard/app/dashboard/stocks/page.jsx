@@ -10,17 +10,23 @@ function authHeaders() {
 }
 
 export default function StocksPage() {
-  const [products, setProducts] = useState([]);
+  const [products, setProducts]       = useState([]);
   const [selectedProduct, setSelectedProduct] = useState('');
-  const [rawText, setRawText] = useState('');
-  const [stocks, setStocks] = useState([]);
+  const [rawText, setRawText]         = useState('');
+  const [stocks, setStocks]           = useState([]);
   const [uploadResult, setUploadResult] = useState(null);
-  const [uploading, setUploading] = useState(false);
+  const [uploading, setUploading]     = useState(false);
+
+  // Edit state
+  const [editingId, setEditingId]     = useState(null);
+  const [editForm, setEditForm]       = useState({ email: '', password: '' });
+  const [editLoading, setEditLoading] = useState(false);
 
   useEffect(() => { fetchProducts(); }, []);
+  useEffect(() => { fetchStocks(); }, [selectedProduct]);
 
   async function fetchProducts() {
-    const res = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
+    const res  = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
     const data = await res.json();
     setProducts(data);
   }
@@ -30,8 +36,6 @@ export default function StocksPage() {
     const res = await fetch(`${API}/api/admin/stocks/${selectedProduct}`, { headers: authHeaders() });
     setStocks(await res.json());
   }
-
-  useEffect(() => { fetchStocks(); }, [selectedProduct]);
 
   async function handleUpload() {
     if (!selectedProduct) return alert('Select a product first.');
@@ -45,16 +49,45 @@ export default function StocksPage() {
 
     setUploading(true);
     try {
-      const res = await fetch(`${API}/api/admin/stocks/upload`, {
-        method: 'POST',
+      const res  = await fetch(`${API}/api/admin/stocks/upload`, {
+        method : 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ product_id: parseInt(selectedProduct), stocks: stockItems }),
+        body   : JSON.stringify({ product_id: parseInt(selectedProduct), stocks: stockItems }),
       });
       const data = await res.json();
       setUploadResult(data);
       setRawText('');
       fetchStocks();
     } finally { setUploading(false); }
+  }
+
+  function startEdit(s) {
+    setEditingId(s.id);
+    setEditForm({ email: s.email, password: s.password || '' });
+  }
+
+  async function handleEditSave(id) {
+    if (!editForm.email) return alert('Email tidak boleh kosong.');
+    setEditLoading(true);
+    try {
+      await fetch(`${API}/api/admin/stocks/${id}`, {
+        method : 'PUT',
+        headers: authHeaders(),
+        body   : JSON.stringify(editForm),
+      });
+      setEditingId(null);
+      fetchStocks();
+    } finally { setEditLoading(false); }
+  }
+
+  async function handleDelete(id, status) {
+    if (status === 'sold') {
+      if (!confirm('Stok ini sudah terjual. Yakin ingin menghapus?')) return;
+    } else {
+      if (!confirm('Hapus stok ini?')) return;
+    }
+    await fetch(`${API}/api/admin/stocks/${id}`, { method: 'DELETE', headers: authHeaders() });
+    fetchStocks();
   }
 
   const available = stocks.filter(s => s.status === 'available').length;
@@ -64,6 +97,7 @@ export default function StocksPage() {
     <div>
       <h1 className="text-2xl font-semibold mb-6">🗄️ Stock Management</h1>
 
+      {/* Upload */}
       <div className="bg-white rounded-2xl shadow p-6 mb-6">
         <h2 className="font-medium mb-4">Upload Stock</h2>
 
@@ -101,11 +135,12 @@ export default function StocksPage() {
 
         {uploadResult && (
           <div className="mt-3 inline-flex items-center gap-2 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">
-            ✅ Successfully uploaded <strong>{uploadResult.inserted}</strong> accounts
+            ✅ Berhasil upload <strong>{uploadResult.inserted}</strong> akun
           </div>
         )}
       </div>
 
+      {/* Stock List */}
       {selectedProduct && (
         <div className="bg-white rounded-2xl shadow overflow-hidden">
           <div className="px-6 py-4 border-b flex items-center justify-between">
@@ -121,28 +156,96 @@ export default function StocksPage() {
               <tr>
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3">Password</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Added</th>
+                <th className="px-4 py-3">Aksi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {stocks.map((s, i) => (
-                <tr key={s.id} className="hover:bg-gray-50">
+                <tr key={s.id} className={`hover:bg-gray-50 ${editingId === s.id ? 'bg-blue-50' : ''}`}>
                   <td className="px-4 py-2 text-gray-400">{i + 1}</td>
-                  <td className="px-4 py-2 font-mono text-xs">{s.email}</td>
-                  <td className="px-4 py-2">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                      s.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
-                      {s.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-gray-400 text-xs">
-                    {new Date(s.created_at).toLocaleDateString('id-ID')}
-                  </td>
+
+                  {editingId === s.id ? (
+                    <>
+                      <td className="px-4 py-2">
+                        <input
+                          className="border rounded px-2 py-1 text-xs font-mono w-full"
+                          value={editForm.email}
+                          onChange={e => setEditForm({ ...editForm, email: e.target.value })}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          className="border rounded px-2 py-1 text-xs font-mono w-full"
+                          value={editForm.password}
+                          onChange={e => setEditForm({ ...editForm, password: e.target.value })}
+                          placeholder="password"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          s.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-400 text-xs">
+                        {new Date(s.created_at).toLocaleDateString('id-ID')}
+                      </td>
+                      <td className="px-4 py-2 flex gap-2">
+                        <button
+                          onClick={() => handleEditSave(s.id)}
+                          disabled={editLoading}
+                          className="text-xs bg-blue-600 text-white px-2 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {editLoading ? '...' : 'Simpan'}
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="text-xs bg-gray-200 text-gray-700 px-2 py-1 rounded hover:bg-gray-300"
+                        >
+                          Batal
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-4 py-2 font-mono text-xs">{s.email}</td>
+                      <td className="px-4 py-2 font-mono text-xs text-gray-400">
+                        {s.password ? '••••••••' : '-'}
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                          s.status === 'available' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-gray-400 text-xs">
+                        {new Date(s.created_at).toLocaleDateString('id-ID')}
+                      </td>
+                      <td className="px-4 py-2 flex gap-2">
+                        {s.status === 'available' && (
+                          <button
+                            onClick={() => startEdit(s)}
+                            className="text-xs text-blue-600 hover:underline"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDelete(s.id, s.status)}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Hapus
+                        </button>
+                      </td>
+                    </>
+                  )}
                 </tr>
               ))}
               {!stocks.length && (
-                <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No stock for this product.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No stock for this product.</td></tr>
               )}
             </tbody>
           </table>
