@@ -52,7 +52,9 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch { ctx.reply('Gagal memuat bantuan.'); }
   });
 
-  bot.hears('🛍 Daftar Produk', (ctx) => showProductList(ctx, 1));
+  bot.hears('🛍 Daftar Produk', async (ctx) => {
+    await showLoadingThenProductList(ctx);
+  });
   bot.hears('Selanjutnya ▶️', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, (userProductMap[key]?._page || 1) + 1); });
   bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
   bot.hears('🏠 Menu', async (ctx) => { await ctx.reply('Pilih menu:', Markup.keyboard([['🛍 Daftar Produk','💰 Saldo Saya'],['📦 Pesanan Saya','📞 Bantuan']]).resize()); });
@@ -427,6 +429,31 @@ bot.hears('📦 Pesanan Saya', async (ctx) => {
   bot.action('qty_noop', (ctx) => { try { ctx.answerCbQuery(); } catch {} });
 
   // ── HELPERS ───────────────────────────────────────────────
+
+  async function showLoadingThenProductList(ctx) {
+  const frames = [
+    '⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%',
+    '🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%',
+    '🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜ 30%',
+    '🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜ 50%',
+    '🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜ 70%',
+    '🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜ 90%',
+    '🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦 100%',
+  ];
+
+  const msg = await ctx.reply(`⏳ Memuat produk...\n${frames[0]}`);
+
+  for (let i = 1; i < frames.length; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    await ctx.telegram.editMessageText(
+      msg.chat.id, msg.message_id, null,
+      `⏳ Memuat produk...\n${frames[i]}`
+    ).catch(() => {});
+  }
+
+  await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+  await showProductList(ctx, 1);
+}
 
   async function showProductList(ctx, page) {
     try {
