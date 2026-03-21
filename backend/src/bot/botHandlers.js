@@ -57,6 +57,55 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
   bot.hears('🏠 Menu', async (ctx) => { await ctx.reply('Pilih menu:', Markup.keyboard([['🛍 Daftar Produk','💰 Saldo Saya'],['📦 Pesanan Saya','📞 Bantuan']]).resize()); });
 
+  // ── Pesanan Saya ──────────────────────────────────────────
+bot.hears('📦 Pesanan Saya', async (ctx) => {
+  const telegramId = ctx.from.id.toString();
+  try {
+    const { rows: [user] } = await pool.query(
+      'SELECT id FROM users WHERE telegram_id=$1 AND tenant_id=$2',
+      [telegramId, tenantId]
+    );
+    if (!user) return ctx.reply('Silakan kirim /start terlebih dahulu.');
+
+    const { rows: orders } = await pool.query(
+      `SELECT o.id, o.amount, o.status, o.qty, o.created_at,
+              p.name AS product_name,
+              pv.name AS variant_name
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN product_variants pv ON pv.id = o.variant_id
+       WHERE o.user_id=$1 AND o.tenant_id=$2
+       ORDER BY o.created_at DESC
+       LIMIT 10`,
+      [user.id, tenantId]
+    );
+
+    if (!orders.length) {
+      return ctx.reply(
+        `📦 *Pesanan Saya*\n\nKamu belum memiliki pesanan.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    const statusEmoji = { paid: '✅', pending: '⏳', failed: '❌', expired: '🕐' };
+
+    const list = orders.map((o, i) => {
+      const prodLabel = o.variant_name ? `${o.product_name} - ${o.variant_name}` : o.product_name;
+      const emoji     = statusEmoji[o.status] || '❓';
+      const tgl       = new Date(o.created_at).toLocaleDateString('id-ID');
+      return `${i + 1}. ${emoji} *${prodLabel}*\n   🛒 x${o.qty} • Rp ${Number(o.amount).toLocaleString('id-ID')}\n   🧾 #${o.id} • ${tgl}`;
+    }).join('\n\n');
+
+    await ctx.reply(
+      `📦 *Pesanan Saya* _(10 terakhir)_\n\n${list}`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) {
+    console.error('pesanan saya error:', err);
+    ctx.reply('Gagal memuat pesanan.');
+  }
+});
+
   bot.hears(/^(\d+)$/, async (ctx) => {
     const num = ctx.message.text;
     const key = `${tenantId}_${ctx.from.id}`;
