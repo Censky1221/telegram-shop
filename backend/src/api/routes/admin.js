@@ -21,16 +21,11 @@ function authMiddleware(req, res, next) {
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-
   try {
-    const { rows: [admin] } = await pool.query(
-      'SELECT * FROM admins WHERE email = $1', [email]
-    );
+    const { rows: [admin] } = await pool.query('SELECT * FROM admins WHERE email = $1', [email]);
     if (!admin) return res.status(401).json({ error: 'Invalid credentials' });
-
     const match = await bcrypt.compare(password, admin.password_hash);
     if (!match) return res.status(401).json({ error: 'Invalid credentials' });
-
     const token = jwt.sign(
       { id: admin.id, email: admin.email, tenant_id: admin.tenant_id },
       process.env.JWT_SECRET,
@@ -47,7 +42,6 @@ router.post('/register', async (req, res) => {
   const { email, password, tenant_id } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
   if (password.length < 6) return res.status(400).json({ error: 'Password minimal 6 karakter' });
-
   try {
     if (tenant_id) {
       const { rows: [tenant] } = await pool.query(
@@ -55,13 +49,10 @@ router.post('/register', async (req, res) => {
       );
       if (!tenant) return res.status(404).json({ error: 'Tenant tidak ditemukan atau tidak aktif' });
     }
-
     const hash = await bcrypt.hash(password, 12);
     const { rows: [admin] } = await pool.query(
-      `INSERT INTO admins (email, password_hash, tenant_id)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (email) DO NOTHING
-       RETURNING id, email, tenant_id`,
+      `INSERT INTO admins (email, password_hash, tenant_id) VALUES ($1,$2,$3)
+       ON CONFLICT (email) DO NOTHING RETURNING id, email, tenant_id`,
       [email, hash, tenant_id || null]
     );
     if (!admin) return res.status(409).json({ error: 'Email sudah terdaftar' });
@@ -87,10 +78,10 @@ router.get('/products', authMiddleware, async (req, res) => {
 
 router.post('/products', authMiddleware, async (req, res) => {
   const { name, description, price, terms } = req.body;
-  if (!name || !price) return res.status(400).json({ error: 'name and price required' });
+  if (!name) return res.status(400).json({ error: 'name required' });
   const { rows: [p] } = await pool.query(
     `INSERT INTO products (name, description, price, terms, tenant_id) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-    [name, description, price, terms || null, req.admin.tenant_id]
+    [name, description, price || 0, terms || null, req.admin.tenant_id]
   );
   res.status(201).json(p);
 });
@@ -107,17 +98,14 @@ router.put('/products/:id', authMiddleware, async (req, res) => {
 });
 
 router.delete('/products/:id', authMiddleware, async (req, res) => {
-  await pool.query(
-    `UPDATE products SET is_active=false WHERE id=$1 AND tenant_id=$2`,
-    [req.params.id, req.admin.tenant_id]
-  );
+  await pool.query(`UPDATE products SET is_active=false WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
   res.json({ message: 'Product deactivated' });
 });
 
-// ── Hapus permanen produk (hanya jika stok = 0) ───────────────────
 router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
   try {
     await pool.query(`DELETE FROM stocks WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    await pool.query(`DELETE FROM product_variants WHERE product_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
     await pool.query(`DELETE FROM products WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
     res.json({ message: 'Product deleted permanently' });
   } catch (err) {
@@ -125,38 +113,149 @@ router.delete('/products/:id/destroy', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Variants ──────────────────────────────────────────────────────
+router.get('/variants', authMiddleware, async (req, res) => {
+  const { productId } = req.query;
+  if (!productId) return res.status(400).json({ error: 'productId required' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT pv.*,
+              COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
+              COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+       FROM product_variants pv
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.product_id=$1 AND pv.tenant_id=$2
+       GROUP BY pv.id ORDER BY pv.id`,
+      [productId, req.admin.tenant_id]
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/variants', authMiddleware, async (req, res) => {
+  const { product_id, name, description, price, terms } = req.body;
+  if (!product_id || !name || price === undefined) return res.status(400).json({ error: 'product_id, name, price required' });
+  try {
+    const { rows: [v] } = await pool.query(
+      `INSERT INTO product_variants (product_id, tenant_id, name, description, price, terms)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [product_id, req.admin.tenant_id, name, description || null, price, terms || null]
+    );
+    res.json(v);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/variants/:id', authMiddleware, async (req, res) => {
+  const { name, description, price, is_active, terms } = req.body;
+  try {
+    const fields = [], values = [];
+    let idx = 1;
+    if (name        !== undefined) { fields.push(`name=$${idx++}`);        values.push(name); }
+    if (description !== undefined) { fields.push(`description=$${idx++}`); values.push(description); }
+    if (price       !== undefined) { fields.push(`price=$${idx++}`);       values.push(price); }
+    if (is_active   !== undefined) { fields.push(`is_active=$${idx++}`);   values.push(is_active); }
+    if (terms       !== undefined) { fields.push(`terms=$${idx++}`);       values.push(terms); }
+    if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
+    values.push(req.params.id, req.admin.tenant_id);
+    const { rows: [v] } = await pool.query(
+      `UPDATE product_variants SET ${fields.join(', ')} WHERE id=$${idx++} AND tenant_id=$${idx} RETURNING *`,
+      values
+    );
+    if (!v) return res.status(404).json({ error: 'Variant not found' });
+    res.json(v);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/variants/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM stocks WHERE variant_id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    await pool.query(`DELETE FROM product_variants WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Stocks ────────────────────────────────────────────────────────
 router.get('/stocks/:productId', authMiddleware, async (req, res) => {
-  const { rows } = await pool.query(
-    `SELECT id, email, password, status, created_at FROM stocks
-     WHERE product_id=$1 AND tenant_id=$2 ORDER BY id DESC`,
-    [req.params.productId, req.admin.tenant_id]
-  );
-  res.json(rows);
+  const { variantId } = req.query;
+  try {
+    let query, params;
+    if (variantId) {
+      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
+      params = [variantId, req.admin.tenant_id];
+    } else {
+      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
+      params = [req.params.productId, req.admin.tenant_id];
+    }
+    const { rows } = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/stocks/upload', authMiddleware, async (req, res) => {
-  const { product_id, stocks } = req.body;
-  if (!product_id || !Array.isArray(stocks) || !stocks.length) {
-    return res.status(400).json({ error: 'product_id and stocks array required' });
-  }
-
+  const { product_id, variant_id, stocks } = req.body;
+  if (!product_id || !Array.isArray(stocks) || !stocks.length)
+    return res.status(400).json({ error: 'product_id and stocks required' });
   const valid = stocks.filter(s => s.email && s.password);
   if (!valid.length) return res.status(400).json({ error: 'No valid entries found' });
-
-  const values = valid
-    .map((_, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3}, 'available', $${valid.length * 2 + 2})`)
-    .join(', ');
-  const params = [product_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
-
-  const result = await pool.query(
-    `INSERT INTO stocks (product_id, email, password, status, tenant_id) VALUES ${values}`,
-    params
-  );
-  res.json({ inserted: result.rowCount });
+  try {
+    let result;
+    if (variant_id) {
+      const values = valid.map((_, i) =>
+        `($1, $2, $${i * 2 + 3}, $${i * 2 + 4}, 'available', $${valid.length * 2 + 3})`
+      ).join(', ');
+      const params = [product_id, variant_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+      result = await pool.query(
+        `INSERT INTO stocks (product_id, variant_id, email, password, status, tenant_id) VALUES ${values}`, params
+      );
+    } else {
+      const values = valid.map((_, i) =>
+        `($1, $${i * 2 + 2}, $${i * 2 + 3}, 'available', $${valid.length * 2 + 2})`
+      ).join(', ');
+      const params = [product_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+      result = await pool.query(
+        `INSERT INTO stocks (product_id, email, password, status, tenant_id) VALUES ${values}`, params
+      );
+    }
+    res.json({ inserted: result.rowCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Search order by ID
+router.put('/stocks/:id', authMiddleware, async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const { rows: [s] } = await pool.query(
+      `UPDATE stocks SET email=$1, password=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [email, password, req.params.id, req.admin.tenant_id]
+    );
+    if (!s) return res.status(404).json({ error: 'Stock not found' });
+    res.json(s);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/stocks/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM stocks WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Orders ────────────────────────────────────────────────────────
 router.get('/orders/search', authMiddleware, async (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'ID required' });
@@ -178,19 +277,12 @@ router.get('/orders/search', authMiddleware, async (req, res) => {
   }
 });
 
-// ── Orders ────────────────────────────────────────────────────────
 router.get('/orders', authMiddleware, async (req, res) => {
   const { status, page = 1 } = req.query;
-  const limit  = 50;
-  const offset = (page - 1) * limit;
-
+  const limit = 50, offset = (page - 1) * limit;
   let whereClause = 'WHERE o.tenant_id = $3';
   const params = [limit, offset, req.admin.tenant_id];
-  if (status) {
-    whereClause += ' AND o.status = $4';
-    params.push(status);
-  }
-
+  if (status) { whereClause += ' AND o.status = $4'; params.push(status); }
   const { rows } = await pool.query(
     `SELECT o.id, o.amount, o.status, o.payment_id, o.created_at, o.paid_at,
             p.name AS product_name,
@@ -199,8 +291,7 @@ router.get('/orders', authMiddleware, async (req, res) => {
      JOIN products p ON p.id = o.product_id
      JOIN users u ON u.id = o.user_id
      ${whereClause}
-     ORDER BY o.created_at DESC
-     LIMIT $1 OFFSET $2`,
+     ORDER BY o.created_at DESC LIMIT $1 OFFSET $2`,
     params
   );
   res.json(rows);
@@ -216,7 +307,6 @@ router.get('/users', authMiddleware, async (req, res) => {
     );
     res.json(rows);
   } catch (err) {
-    console.error('GET /users error:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
@@ -224,34 +314,28 @@ router.get('/users', authMiddleware, async (req, res) => {
 router.post('/users/:id/topup', authMiddleware, async (req, res) => {
   const { amount, note } = req.body;
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
-
   try {
     const { rows: [user] } = await pool.query(
-      `UPDATE users SET balance = balance + $1
-       WHERE id=$2 AND tenant_id=$3
+      `UPDATE users SET balance = balance + $1 WHERE id=$2 AND tenant_id=$3
        RETURNING id, telegram_id, username, balance`,
       [amount, req.params.id, req.admin.tenant_id]
     );
     if (!user) return res.status(404).json({ error: 'User not found' });
-
     try {
       const { getBotByTenantId } = require('../../bot/tenantManager');
       const bot = getBotByTenantId(req.admin.tenant_id);
       if (bot) {
         await bot.telegram.sendMessage(
           user.telegram_id,
-          `💰 *Saldo Ditambahkan!*\n\n` +
-          `+Rp ${Number(amount).toLocaleString('id-ID')}\n` +
+          `💰 *Saldo Ditambahkan!*\n\n+Rp ${Number(amount).toLocaleString('id-ID')}\n` +
           `Saldo sekarang: *Rp ${Number(user.balance).toLocaleString('id-ID')}*\n\n` +
           (note ? `📝 Catatan: ${note}` : ''),
           { parse_mode: 'Markdown' }
         );
       }
     } catch (e) { console.warn('Telegram notify failed:', e.message); }
-
     res.json({ success: true, user });
   } catch (err) {
-    console.error('topup error:', err);
     res.status(500).json({ error: 'Topup failed' });
   }
 });
@@ -259,27 +343,23 @@ router.post('/users/:id/topup', authMiddleware, async (req, res) => {
 router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
   const { amount } = req.body;
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
-
   try {
     const { rows: [user] } = await pool.query(
-      `UPDATE users SET balance = GREATEST(balance - $1, 0)
-       WHERE id=$2 AND tenant_id=$3
+      `UPDATE users SET balance = GREATEST(balance - $1, 0) WHERE id=$2 AND tenant_id=$3
        RETURNING id, telegram_id, username, balance`,
       [amount, req.params.id, req.admin.tenant_id]
     );
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json({ success: true, user });
   } catch (err) {
-    console.error('deduct error:', err);
     res.status(500).json({ error: 'Deduct failed' });
   }
 });
 
-// ── Settings (Banner + S&K) ───────────────────────────────────────
+// ── Settings ──────────────────────────────────────────────────────
 router.get('/settings', authMiddleware, async (req, res) => {
   const { rows: [tenant] } = await pool.query(
-    `SELECT banner_file_id, terms, help_text FROM tenants WHERE id=$1`,
-    [req.admin.tenant_id]
+    `SELECT banner_file_id, terms, help_text FROM tenants WHERE id=$1`, [req.admin.tenant_id]
   );
   res.json(tenant || {});
 });
@@ -297,57 +377,21 @@ router.put('/settings', authMiddleware, async (req, res) => {
 router.post('/broadcast', authMiddleware, async (req, res) => {
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
-
   try {
     const { rows: users } = await pool.query(
-      `SELECT telegram_id FROM users WHERE tenant_id=$1`,
-      [req.admin.tenant_id]
+      `SELECT telegram_id FROM users WHERE tenant_id=$1`, [req.admin.tenant_id]
     );
-
     const { getBotByTenantId } = require('../../bot/tenantManager');
     const bot = getBotByTenantId(req.admin.tenant_id);
     if (!bot) return res.status(500).json({ error: 'Bot tidak ditemukan.' });
-
     let sent = 0, failed = 0;
     for (const user of users) {
       try {
         await bot.telegram.sendMessage(user.telegram_id, message, { parse_mode: 'Markdown' });
         sent++;
-      } catch {
-        failed++;
-      }
+      } catch { failed++; }
     }
-
     res.json({ success: true, sent, failed, total: users.length });
-  } catch (err) {
-    console.error('broadcast error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Edit stok
-router.put('/stocks/:id', authMiddleware, async (req, res) => {
-  const { email, password } = req.body;
-  try {
-    const { rows: [s] } = await pool.query(
-      `UPDATE stocks SET email=$1, password=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
-      [email, password, req.params.id, req.admin.tenant_id]
-    );
-    if (!s) return res.status(404).json({ error: 'Stock not found' });
-    res.json(s);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Hapus stok
-router.delete('/stocks/:id', authMiddleware, async (req, res) => {
-  try {
-    await pool.query(
-      `DELETE FROM stocks WHERE id=$1 AND tenant_id=$2`,
-      [req.params.id, req.admin.tenant_id]
-    );
-    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
