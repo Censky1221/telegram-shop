@@ -187,7 +187,7 @@ module.exports = function registerHandlers(bot, tenant) {
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
-      for (let i = 0; i < qty; i++) await assignStockAndDeliver(order, tenantId);
+      await assignStockAndDeliver(order, tenantId);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_v error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
   });
@@ -234,7 +234,7 @@ module.exports = function registerHandlers(bot, tenant) {
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
-      for (let i = 0; i < qty; i++) await assignStockAndDeliver(order, tenantId);
+      await assignStockAndDeliver(order, tenantId);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_p error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
   });
@@ -358,16 +358,19 @@ module.exports = function registerHandlers(bot, tenant) {
       if (user) await pool.query(`DELETE FROM orders WHERE user_id=$1 AND tenant_id=$2 AND status='pending'`, [user.id, tenantId]);
     } catch (err) { console.error('cancel_buy error:', err.message); }
     await ctx.deleteMessage().catch(() => {});
+    await ctx.reply('❌ Pesanan dibatalkan.', Markup.keyboard([['🛍 Daftar Produk','💰 Saldo Saya'],['📦 Pesanan Saya','📞 Bantuan']]).resize());
   });
 
   bot.action('back_to_list', async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
+    await ctx.deleteMessage().catch(() => {});
     const key = `${tenantId}_${ctx.from.id}`;
     await showProductList(ctx, userProductMap[key]?._page || 1);
   });
 
   bot.action(/^back_to_product_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
+    await ctx.deleteMessage().catch(() => {});
     await showProductDetail(ctx, parseInt(ctx.match[1]));
   });
 
