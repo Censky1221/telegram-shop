@@ -397,4 +397,58 @@ router.post('/broadcast', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Statistik ─────────────────────────────────────────────────────
+router.get('/stats', authMiddleware, async (req, res) => {
+  const tid = req.admin.tenant_id;
+  try {
+    const [revToday, revWeek, revMonth, ordersPaid, ordersPending, usersTotal, usersNewWeek, topProducts, dailyChart] = await Promise.all([
+      // Pendapatan hari ini
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= CURRENT_DATE`, [tid]),
+      // Pendapatan minggu ini
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('week', NOW())`, [tid]),
+      // Pendapatan bulan ini
+      pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('month', NOW())`, [tid]),
+      // Total paid
+      pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='paid'`, [tid]),
+      // Total pending
+      pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='pending'`, [tid]),
+      // Total user
+      pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1`, [tid]),
+      // User baru 7 hari
+      pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '7 days'`, [tid]),
+      // Top produk/varian
+      pool.query(`
+        SELECT p.name AS product_name, pv.name AS variant_name,
+               COUNT(o.id) AS total_sold, COALESCE(SUM(o.amount),0) AS total_revenue
+        FROM orders o
+        JOIN products p ON p.id = o.product_id
+        LEFT JOIN product_variants pv ON pv.id = o.variant_id
+        WHERE o.tenant_id=$1 AND o.status='paid'
+        GROUP BY p.name, pv.name
+        ORDER BY total_sold DESC LIMIT 10`, [tid]),
+      // Grafik 14 hari
+      pool.query(`
+        SELECT DATE(paid_at) AS date, COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
+        FROM orders WHERE tenant_id=$1 AND status='paid'
+          AND paid_at >= NOW() - INTERVAL '14 days'
+        GROUP BY DATE(paid_at) ORDER BY date ASC`, [tid]),
+    ]);
+
+    res.json({
+      revenue_today   : revToday.rows[0].total,
+      revenue_week    : revWeek.rows[0].total,
+      revenue_month   : revMonth.rows[0].total,
+      orders_paid     : ordersPaid.rows[0].cnt,
+      orders_pending  : ordersPending.rows[0].cnt,
+      users_total     : usersTotal.rows[0].cnt,
+      users_new_week  : usersNewWeek.rows[0].cnt,
+      top_products    : topProducts.rows,
+      daily_chart     : dailyChart.rows,
+    });
+  } catch (err) {
+    console.error('stats error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
