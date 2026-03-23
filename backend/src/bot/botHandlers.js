@@ -154,14 +154,20 @@ module.exports = function registerHandlers(bot, tenant) {
            AND (expired_at IS NULL OR expired_at > NOW())`,
         [code, tenantId]
       );
-      if (!voucher) return ctx.reply('❌ Kode voucher tidak valid atau sudah expired.');
+      if (!voucher) {
+        delete userVoucherMap[vKey];
+        return ctx.reply('❌ Kode voucher tidak valid atau sudah expired.');
+      }
 
       // Cek pemakaian per user
       const { rows: [usage] } = await pool.query(
         `SELECT COUNT(*) AS cnt FROM voucher_usage WHERE voucher_id=$1 AND user_id=$2`,
         [voucher.id, user.id]
       );
-      if (parseInt(usage.cnt) >= voucher.max_per_user) return ctx.reply('❌ Kamu sudah pernah menggunakan voucher ini.');
+      if (parseInt(usage.cnt) >= voucher.max_per_user) {
+        delete userVoucherMap[vKey];
+        return ctx.reply('❌ Kamu sudah pernah menggunakan voucher ini.');
+      }
 
       // Hitung diskon
       const discount    = voucher.type === 'percent' ? Math.round(amount * voucher.value / 100) : Math.min(voucher.value, amount);
