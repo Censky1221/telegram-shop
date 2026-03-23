@@ -66,9 +66,11 @@ router.post('/register', async (req, res) => {
 // ── Products ──────────────────────────────────────────────────────
 router.get('/products', authMiddleware, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS available,
+    `SELECT p.*,
+            COUNT(s.id) FILTER (WHERE s.status='available') AS available,
             COUNT(s.id) FILTER (WHERE s.status='sold') AS sold
-     FROM products p LEFT JOIN stocks s ON s.product_id = p.id
+     FROM products p
+     LEFT JOIN stocks s ON s.product_id = p.id
      WHERE p.tenant_id=$1
      GROUP BY p.id ORDER BY p.id`,
     [req.admin.tenant_id]
@@ -419,7 +421,8 @@ router.get('/stats', authMiddleware, async (req, res) => {
       // Top produk/varian
       pool.query(`
         SELECT p.name AS product_name, pv.name AS variant_name,
-               COUNT(o.id) AS total_sold, COALESCE(SUM(o.amount),0) AS total_revenue
+               COALESCE(SUM(o.qty),0) AS total_sold,
+               COALESCE(SUM(o.amount),0) AS total_revenue
         FROM orders o
         JOIN products p ON p.id = o.product_id
         LEFT JOIN product_variants pv ON pv.id = o.variant_id
