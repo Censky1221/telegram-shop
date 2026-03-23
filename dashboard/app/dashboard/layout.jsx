@@ -10,6 +10,7 @@ const navItems = [
   { href: '/dashboard/stocks',    label: '🗄️ Stocks' },
   { href: '/dashboard/orders',    label: '📋 Orders' },
   { href: '/dashboard/users',     label: '👤 Users & Saldo' },
+  { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
 ];

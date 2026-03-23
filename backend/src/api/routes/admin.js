@@ -454,4 +454,84 @@ router.get('/stats', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Vouchers ──────────────────────────────────────────────────────
+router.get('/vouchers', authMiddleware, async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM vouchers WHERE tenant_id=$1 ORDER BY created_at DESC`,
+    [req.admin.tenant_id]
+  );
+  res.json(rows);
+});
+
+router.post('/vouchers', authMiddleware, async (req, res) => {
+  const { code, type, value, max_per_user, expired_at } = req.body;
+  if (!code || !type || !value) return res.status(400).json({ error: 'code, type, value required' });
+  if (type === 'percent' && value > 100) return res.status(400).json({ error: 'Persen maksimal 100' });
+  try {
+    const { rows: [v] } = await pool.query(
+      `INSERT INTO vouchers (tenant_id, code, type, value, max_per_user, expired_at)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [req.admin.tenant_id, code.toUpperCase(), type, value, max_per_user || 1, expired_at || null]
+    );
+    res.json(v);
+  } catch (err) {
+    if (err.code === '23505') return res.status(400).json({ error: 'Kode voucher sudah ada.' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/vouchers/:id', authMiddleware, async (req, res) => {
+  const { code, type, value, max_per_user, expired_at, is_active } = req.body;
+  try {
+    const fields = [], values = [];
+    let idx = 1;
+    if (code        !== undefined) { fields.push(`code=$${idx++}`);         values.push(code?.toUpperCase()); }
+    if (type        !== undefined) { fields.push(`type=$${idx++}`);         values.push(type); }
+    if (value       !== undefined) { fields.push(`value=$${idx++}`);        values.push(value); }
+    if (max_per_user!== undefined) { fields.push(`max_per_user=$${idx++}`); values.push(max_per_user); }
+    if (expired_at  !== undefined) { fields.push(`expired_at=$${idx++}`);   values.push(expired_at || null); }
+    if (is_active   !== undefined) { fields.push(`is_active=$${idx++}`);    values.push(is_active); }
+    if (!fields.length) return res.status(400).json({ error: 'No fields' });
+    values.push(req.params.id, req.admin.tenant_id);
+    const { rows: [v] } = await pool.query(
+      `UPDATE vouchers SET ${fields.join(',')} WHERE id=$${idx++} AND tenant_id=$${idx} RETURNING *`,
+      values
+    );
+    res.json(v);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/vouchers/:id', authMiddleware, async (req, res) => {
+  await pool.query(`DELETE FROM vouchers WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+  res.json({ success: true });
+});
+
+// Validasi voucher dari bot
+router.post('/vouchers/validate', authMiddleware, async (req, res) => {
+  const { code, user_id, amount } = req.body;
+  try {
+    const { rows: [v] } = await pool.query(
+      `SELECT * FROM vouchers WHERE code=$1 AND tenant_id=$2 AND is_active=true`,
+      [code.toUpperCase(), req.admin.tenant_id]
+    );
+    if (!v) return res.status(404).json({ error: 'Voucher tidak ditemukan.' });
+    if (v.expired_at && new Date(v.expired_at) < new Date())
+      return res.status(400).json({ error: 'Voucher sudah expired.' });
+    const { rows: [usage] } = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM voucher_usage WHERE voucher_id=$1 AND user_id=$2`,
+      [v.id, user_id]
+    );
+    if (parseInt(usage.cnt) >= v.max_per_user)
+      return res.status(400).json({ error: 'Kamu sudah pernah menggunakan voucher ini.' });
+    const discount = v.type === 'percent'
+      ? Math.round(amount * v.value / 100)
+      : Math.min(v.value, amount);
+    res.json({ valid: true, voucher: v, discount, final_amount: amount - discount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
