@@ -617,6 +617,9 @@ module.exports = function registerHandlers(bot, tenant) {
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
       for (let i = 0; i < numKeys.length; i += 6) keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
+      // Tombol Daftar Produk & Voucher di atas angka
+    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+
       const navRow = [];
       if (safePage > 1) navRow.push(Markup.button.text('◀️ Sebelumnya'));
       if (safePage < totalPages) navRow.push(Markup.button.text('Selanjutnya ▶️'));
