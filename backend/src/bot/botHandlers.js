@@ -69,6 +69,37 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
   bot.hears('🏠 Menu', async (ctx) => { await ctx.reply('Pilih menu:', MAIN_KEYBOARD); });
 
+  bot.hears('🔥 Populer', async (ctx) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.name AS product_name,
+              pv.name AS variant_name,
+              COALESCE(SUM(o.qty), 0) AS total_sold
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN product_variants pv ON pv.id = o.variant_id
+       WHERE o.tenant_id=$1 AND o.status='paid'
+       GROUP BY p.name, pv.name
+       ORDER BY total_sold DESC
+       LIMIT 5`,
+      [tenantId]
+    );
+
+    if (!rows.length) return ctx.reply('🔥 *Produk Populer*\n\nBelum ada data penjualan.', { parse_mode: 'Markdown' });
+
+    const list = rows.map((r, i) => {
+      const label = r.variant_name ? `${r.product_name} - ${r.variant_name}` : r.product_name;
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+      return `${medal} *${label}*\n   📦 ${r.total_sold} terjual`;
+    }).join('\n\n');
+
+    await ctx.reply(`🔥 *Produk Terlaris*\n\n${list}`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('populer error:', err);
+    ctx.reply('Gagal memuat produk populer.');
+  }
+});
+
   // ── Pesanan Saya ──────────────────────────────────────────
   bot.hears('📦 Pesanan Saya', async (ctx) => {
     const telegramId = ctx.from.id.toString();
@@ -624,6 +655,7 @@ module.exports = function registerHandlers(bot, tenant) {
       if (safePage > 1) navRow.push(Markup.button.text('◀️ Sebelumnya'));
       if (safePage < totalPages) navRow.push(Markup.button.text('Selanjutnya ▶️'));
       navRow.push(Markup.button.text('🏠 Menu'));
+      navRow.push(Markup.button.text('🔥 Populer'));
       keyRows.push(navRow);
       const divider = `┊ - - - - - - - - - - - - - - - -`;
       const lines = pageItems.map((p, i) => { const stock = parseInt(p.stock_count); return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`; }).join('\n');
