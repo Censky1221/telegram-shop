@@ -67,7 +67,52 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.hears('🛍 Daftar Produk', async (ctx) => { await showLoadingThenProductList(ctx); });
   bot.hears('Selanjutnya ▶️', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, (userProductMap[key]?._page || 1) + 1); });
   bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
-  bot.hears('🏠 Menu', async (ctx) => { await ctx.reply('Pilih menu:', MAIN_KEYBOARD); });
+  bot.hears('🏠 Menu', async (ctx) => {
+  const telegramId = ctx.from.id.toString();
+  const username   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+  const now        = new Date().toLocaleString('id-ID', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
+  });
+  try {
+    const { rows: [user] } = await pool.query(
+      `SELECT u.balance,
+              COUNT(o.id) FILTER (WHERE o.status='paid') AS total_transaksi,
+              COALESCE(SUM(o.amount) FILTER (WHERE o.status='paid'), 0) AS total_belanja
+       FROM users u
+       LEFT JOIN orders o ON o.user_id=u.id AND o.tenant_id=$2
+       WHERE u.telegram_id=$1 AND u.tenant_id=$2
+       GROUP BY u.balance`,
+      [telegramId, tenantId]
+    );
+
+    const { rows: [botStats] } = await pool.query(
+      `SELECT COUNT(DISTINCT u.id) AS total_users,
+              COALESCE(SUM(o.qty) FILTER (WHERE o.status='paid'), 0) AS total_terjual
+       FROM users u
+       LEFT JOIN orders o ON o.tenant_id=$1
+       WHERE u.tenant_id=$1`,
+      [tenantId]
+    );
+
+    await ctx.reply(
+      `👋 Halo ${username}\n` +
+      `🕐 ${now} WIB\n\n` +
+      `👤 *Informasi Pengguna:*\n` +
+      `├ ID: \`${telegramId}\`\n` +
+      `├ Nama: ${username}\n` +
+      `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
+      `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
+      `📊 *Statistik Bot:*\n` +
+      `├ Total Terjual: *${botStats?.total_terjual || 0} akun*\n` +
+      `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
+      { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+    );
+  } catch (err) {
+    console.error('menu error:', err);
+    await ctx.reply('Pilih menu:', MAIN_KEYBOARD);
+  }
+});
 
   bot.hears('🔥 Populer', async (ctx) => {
   try {
