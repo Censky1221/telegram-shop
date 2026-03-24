@@ -104,7 +104,6 @@ module.exports = function registerHandlers(bot, tenant) {
       `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
       `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
       `📊 *Statistik Bot:*\n` +
-      `├ Total Terjual: *${botStats?.total_terjual || 0} akun*\n` +
       `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
       { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
     );
