@@ -36,7 +36,7 @@ setInterval(async () => {
     const { rows: expiredOrders } = await pool.query(
       `UPDATE orders SET status='expired'
        WHERE status='pending'
-         AND created_at < NOW() - INTERVAL '15 minutes'
+         AND created_at < NOW() - INTERVAL '5 minutes'
        RETURNING id, user_id, tenant_id, amount`
     );
 
@@ -51,7 +51,7 @@ setInterval(async () => {
         if (!bot) continue;
         await bot.telegram.sendMessage(
           user.telegram_id,
-          `⏰ *Pesanan Expired!*\n\n🧾 Order #${order.id} telah dibatalkan otomatis karena tidak dibayar dalam 15 menit.\n\nSilakan buat pesanan baru jika masih ingin membeli.`,
+          `⏰ *Pesanan Expired!*\n\n🧾 Order #${order.id} telah dibatalkan otomatis karena tidak dibayar dalam 5 menit.\n\nSilakan buat pesanan baru jika masih ingin membeli.`,
           { parse_mode: 'Markdown' }
         );
       } catch (e) { console.warn(`Notify expired order #${order.id} failed:`, e.message); }

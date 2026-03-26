@@ -524,7 +524,7 @@ module.exports = function registerHandlers(bot, tenant) {
           [user.id, variant.product_id, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]
         );
         if (voucherId > 0) await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
-        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *15 menit*`;
+        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *5 menit*`;
         const diskonInfo  = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
         const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(result.total_payment||total).toLocaleString('id-ID')}*\n${expiredText}\n\n📲 *Cara Bayar QRIS:*\n1. Buka e-wallet (GoPay, OVO, Dana, dll)\n2. Scan gambar QR di atas\n3. Atau pilih *Salin Kode* jika tidak bisa scan`;
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('📋 Salin Kode QRIS',`copy_qris_${newOrder.id}`)],[Markup.button.callback('✅ Saya Sudah Bayar',`check_pakasir_${newOrder.id}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]);
@@ -536,7 +536,7 @@ module.exports = function registerHandlers(bot, tenant) {
         } catch { await ctx.deleteMessage().catch(() => {}); await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard }).catch(() => {}); }
       } else {
         await pool.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`, [user.id, variant.product_id, variantId, paymentOrderId, result.payment_url, total, qty, tenantId]);
-        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *15 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
+        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *5 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
       }
     } catch (err) { console.error('pay_qris_v error:', err); ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {}); }
   });
@@ -570,7 +570,7 @@ module.exports = function registerHandlers(bot, tenant) {
           [user.id, productId, paymentOrderId, result.payment_number, total, qty, tenantId]
         );
         if (voucherId > 0) await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
-        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *15 menit*`;
+        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *5 menit*`;
         const diskonInfo  = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
         const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(result.total_payment||total).toLocaleString('id-ID')}*\n${expiredText}\n\n📲 *Cara Bayar QRIS:*\n1. Buka e-wallet (GoPay, OVO, Dana, dll)\n2. Scan gambar QR di atas\n3. Atau pilih *Salin Kode* jika tidak bisa scan`;
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('📋 Salin Kode QRIS',`copy_qris_${newOrder.id}`)],[Markup.button.callback('✅ Saya Sudah Bayar',`check_pakasir_${newOrder.id}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]);
@@ -582,7 +582,7 @@ module.exports = function registerHandlers(bot, tenant) {
         } catch { await ctx.deleteMessage().catch(() => {}); await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard }).catch(() => {}); }
       } else {
         await pool.query(`INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`, [user.id, productId, paymentOrderId, result.payment_url, total, qty, tenantId]);
-        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *15 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
+        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *5 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
       }
     } catch (err) { console.error('pay_qris_p error:', err); ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {}); }
   });
