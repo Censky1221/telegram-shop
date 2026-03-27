@@ -65,93 +65,84 @@ module.exports = function registerHandlers(bot, tenant) {
 
   // ── Daftar Produk ─────────────────────────────────────────
   bot.hears('🛍 Daftar Produk', async (ctx) => { await showLoadingThenProductList(ctx); });
-
-  // ── Selanjutnya & Sebelumnya — edit pesan, bukan kirim baru ──
-  bot.hears('Selanjutnya ▶️', async (ctx) => {
-    const key = `${tenantId}_${ctx.from.id}`;
-    await showProductList(ctx, (userProductMap[key]?._page || 1) + 1, true);
-  });
-  bot.hears('◀️ Sebelumnya', async (ctx) => {
-    const key = `${tenantId}_${ctx.from.id}`;
-    await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1), true);
-  });
-
+  bot.hears('Selanjutnya ▶️', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, (userProductMap[key]?._page || 1) + 1); });
+  bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
   bot.hears('🏠 Menu', async (ctx) => {
-    const telegramId = ctx.from.id.toString();
-    const username   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-    const now        = new Date().toLocaleString('id-ID', {
-      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
-    });
-    try {
-      const { rows: [user] } = await pool.query(
-        `SELECT u.balance,
-                COUNT(o.id) FILTER (WHERE o.status='paid') AS total_transaksi,
-                COALESCE(SUM(o.amount) FILTER (WHERE o.status='paid'), 0) AS total_belanja
-         FROM users u
-         LEFT JOIN orders o ON o.user_id=u.id AND o.tenant_id=$2
-         WHERE u.telegram_id=$1 AND u.tenant_id=$2
-         GROUP BY u.balance`,
-        [telegramId, tenantId]
-      );
-
-      const { rows: [botStats] } = await pool.query(
-        `SELECT COUNT(DISTINCT u.id) AS total_users,
-                COALESCE(SUM(o.qty) FILTER (WHERE o.status='paid'), 0) AS total_terjual
-         FROM users u
-         LEFT JOIN orders o ON o.tenant_id=$1
-         WHERE u.tenant_id=$1`,
-        [tenantId]
-      );
-
-      await ctx.reply(
-        `👋 Halo ${username}\n` +
-        `🕐 ${now} WIB\n\n` +
-        `👤 *Informasi Pengguna:*\n` +
-        `├ ID: \`${telegramId}\`\n` +
-        `├ Nama: ${username}\n` +
-        `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
-        `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
-        `📊 *Statistik Bot:*\n` +
-        `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
-        { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
-      );
-    } catch (err) {
-      console.error('menu error:', err);
-      await ctx.reply('Pilih menu:', MAIN_KEYBOARD);
-    }
+  const telegramId = ctx.from.id.toString();
+  const username   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+  const now        = new Date().toLocaleString('id-ID', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
   });
+  try {
+    const { rows: [user] } = await pool.query(
+      `SELECT u.balance,
+              COUNT(o.id) FILTER (WHERE o.status='paid') AS total_transaksi,
+              COALESCE(SUM(o.amount) FILTER (WHERE o.status='paid'), 0) AS total_belanja
+       FROM users u
+       LEFT JOIN orders o ON o.user_id=u.id AND o.tenant_id=$2
+       WHERE u.telegram_id=$1 AND u.tenant_id=$2
+       GROUP BY u.balance`,
+      [telegramId, tenantId]
+    );
+
+    const { rows: [botStats] } = await pool.query(
+      `SELECT COUNT(DISTINCT u.id) AS total_users,
+              COALESCE(SUM(o.qty) FILTER (WHERE o.status='paid'), 0) AS total_terjual
+       FROM users u
+       LEFT JOIN orders o ON o.tenant_id=$1
+       WHERE u.tenant_id=$1`,
+      [tenantId]
+    );
+
+    await ctx.reply(
+      `👋 Halo ${username}\n` +
+      `🕐 ${now} WIB\n\n` +
+      `👤 *Informasi Pengguna:*\n` +
+      `├ ID: \`${telegramId}\`\n` +
+      `├ Nama: ${username}\n` +
+      `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
+      `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
+      `📊 *Statistik Bot:*\n` +
+      `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
+      { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+    );
+  } catch (err) {
+    console.error('menu error:', err);
+    await ctx.reply('Pilih menu:', MAIN_KEYBOARD);
+  }
+});
 
   bot.hears('🔥 Populer', async (ctx) => {
-    try {
-      const { rows } = await pool.query(
-        `SELECT p.name AS product_name,
-                pv.name AS variant_name,
-                COALESCE(SUM(o.qty), 0) AS total_sold
-         FROM orders o
-         JOIN products p ON p.id = o.product_id
-         LEFT JOIN product_variants pv ON pv.id = o.variant_id
-         WHERE o.tenant_id=$1 AND o.status='paid'
-         GROUP BY p.name, pv.name
-         ORDER BY total_sold DESC
-         LIMIT 5`,
-        [tenantId]
-      );
+  try {
+    const { rows } = await pool.query(
+      `SELECT p.name AS product_name,
+              pv.name AS variant_name,
+              COALESCE(SUM(o.qty), 0) AS total_sold
+       FROM orders o
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN product_variants pv ON pv.id = o.variant_id
+       WHERE o.tenant_id=$1 AND o.status='paid'
+       GROUP BY p.name, pv.name
+       ORDER BY total_sold DESC
+       LIMIT 5`,
+      [tenantId]
+    );
 
-      if (!rows.length) return ctx.reply('🔥 *Produk Populer*\n\nBelum ada data penjualan.', { parse_mode: 'Markdown' });
+    if (!rows.length) return ctx.reply('🔥 *Produk Populer*\n\nBelum ada data penjualan.', { parse_mode: 'Markdown' });
 
-      const list = rows.map((r, i) => {
-        const label = r.variant_name ? `${r.product_name} - ${r.variant_name}` : r.product_name;
-        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
-        return `${medal} *${label}*\n   📦 ${r.total_sold} terjual`;
-      }).join('\n\n');
+    const list = rows.map((r, i) => {
+      const label = r.variant_name ? `${r.product_name} - ${r.variant_name}` : r.product_name;
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+      return `${medal} *${label}*\n   📦 ${r.total_sold} terjual`;
+    }).join('\n\n');
 
-      await ctx.reply(`🔥 *Produk Terlaris*\n\n${list}`, { parse_mode: 'Markdown' });
-    } catch (err) {
-      console.error('populer error:', err);
-      ctx.reply('Gagal memuat produk populer.');
-    }
-  });
+    await ctx.reply(`🔥 *Produk Terlaris*\n\n${list}`, { parse_mode: 'Markdown' });
+  } catch (err) {
+    console.error('populer error:', err);
+    ctx.reply('Gagal memuat produk populer.');
+  }
+});
 
   // ── Pesanan Saya ──────────────────────────────────────────
   bot.hears('📦 Pesanan Saya', async (ctx) => {
@@ -204,7 +195,9 @@ module.exports = function registerHandlers(bot, tenant) {
     const vKey     = `${tenantId}_${ctx.from.id}`;
     const pending  = userVoucherMap[vKey];
 
+    // Jika tidak sedang menunggu input voucher, lanjut ke handler lain
     if (!pending) return next();
+    // Jika teks mengandung spasi atau bukan kode, lewati
     if (text.includes(' ')) return next();
 
     if (text.toLowerCase() === 'batal') {
@@ -218,6 +211,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const { rows: [user] } = await pool.query('SELECT id FROM users WHERE telegram_id=$1 AND tenant_id=$2', [telegramId, tenantId]);
       if (!user) return ctx.reply('Silakan kirim /start terlebih dahulu.');
 
+      // Ambil harga
       let price;
       if (pending.type === 'product') {
         const { rows: [p] } = await pool.query(`SELECT price FROM products WHERE id=$1`, [pending.id]);
@@ -229,6 +223,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const qty    = userCart[vKey]?.qty || 1;
       const amount = price * qty;
 
+      // Validasi voucher
       const { rows: [voucher] } = await pool.query(
         `SELECT * FROM vouchers WHERE code=$1 AND tenant_id=$2 AND is_active=true
            AND (expired_at IS NULL OR expired_at > NOW())`,
@@ -239,6 +234,7 @@ module.exports = function registerHandlers(bot, tenant) {
         return ctx.reply('❌ Kode voucher tidak valid atau sudah expired.');
       }
 
+      // Cek pemakaian per user
       const { rows: [usage] } = await pool.query(
         `SELECT COUNT(*) AS cnt FROM voucher_usage WHERE voucher_id=$1 AND user_id=$2`,
         [voucher.id, user.id]
@@ -248,6 +244,7 @@ module.exports = function registerHandlers(bot, tenant) {
         return ctx.reply('❌ Kamu sudah pernah menggunakan voucher ini.');
       }
 
+      // Hitung diskon
       const discount    = voucher.type === 'percent' ? Math.round(amount * voucher.value / 100) : Math.min(voucher.value, amount);
       const finalAmount = amount - discount;
       const diskonText  = voucher.type === 'percent' ? `${voucher.value}%` : `Rp ${Number(voucher.value).toLocaleString('id-ID')}`;
@@ -425,6 +422,7 @@ module.exports = function registerHandlers(bot, tenant) {
         `INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`,
         [user.id, variant.product_id, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]
       );
+      // Catat pemakaian voucher
       if (voucherId > 0) {
         await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
       }
@@ -672,11 +670,10 @@ module.exports = function registerHandlers(bot, tenant) {
       await ctx.telegram.editMessageText(msg.chat.id, msg.message_id, null, `⏳ Memuat produk...\n${frames[i]}`).catch(() => {});
     }
     await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
-    await showProductList(ctx, 1, false);
+    await showProductList(ctx, 1);
   }
 
-  // ── showProductList — isEdit=true → edit pesan sebelumnya ─
-  async function showProductList(ctx, page, isEdit = false) {
+  async function showProductList(ctx, page) {
     try {
       const { rows: allProducts } = await pool.query(
         `SELECT p.id, p.name, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
@@ -685,20 +682,18 @@ module.exports = function registerHandlers(bot, tenant) {
         [tenantId]
       );
       if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
-
       const totalPages = Math.ceil(allProducts.length / PAGE_SIZE);
       const safePage   = Math.min(Math.max(page, 1), totalPages);
       const start      = (safePage - 1) * PAGE_SIZE;
       const pageItems  = allProducts.slice(start, start + PAGE_SIZE);
-
       const key = `${tenantId}_${ctx.from.id}`;
       userProductMap[key] = { _page: safePage };
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
-
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
       for (let i = 0; i < numKeys.length; i += 6) keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
-      keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+      // Tombol Daftar Produk & Voucher di atas angka
+    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
 
       const navRow = [];
       if (safePage > 1) navRow.push(Markup.button.text('◀️ Sebelumnya'));
@@ -706,47 +701,15 @@ module.exports = function registerHandlers(bot, tenant) {
       navRow.push(Markup.button.text('🏠 Menu'));
       navRow.push(Markup.button.text('🔥 Populer'));
       keyRows.push(navRow);
-
       const divider = `┊ - - - - - - - - - - - - - - - -`;
-      const lines   = pageItems.map((p, i) => {
-        const stock = parseInt(p.stock_count);
-        return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`;
-      }).join('\n');
+      const lines = pageItems.map((p, i) => { const stock = parseInt(p.stock_count); return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`; }).join('\n');
       const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
-
-      const keyboard = Markup.keyboard(keyRows).resize();
-
-      if (isEdit) {
-        // ── Edit pesan bot sebelumnya (pesan tepat sebelum pesan user) ──
-        // message_id pesan user = ctx.message.message_id
-        // pesan bot ada di message_id - 1
-        const botMsgId = ctx.message.message_id - 1;
-        try {
-          await ctx.telegram.editMessageText(
-            ctx.chat.id,
-            botMsgId,
-            null,
-            text,
-            { parse_mode: 'Markdown' }
-          );
-          // Hapus pesan tombol user ("Selanjutnya" / "Sebelumnya") agar chat bersih
-          await ctx.deleteMessage().catch(() => {});
-        } catch {
-          // Fallback: kalau edit gagal (misal pesan terlalu lama), kirim baru
-          await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-        }
+      const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
+      if (tenantData?.banner_file_id) {
+        try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
+        catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
       } else {
-        // ── Kirim pesan baru (pertama kali buka daftar produk) ──
-        const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
-        if (tenantData?.banner_file_id) {
-          try {
-            await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...keyboard });
-          } catch {
-            await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-          }
-        } else {
-          await ctx.reply(text, { parse_mode: 'Markdown', ...keyboard });
-        }
+        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
       }
     } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
   }
