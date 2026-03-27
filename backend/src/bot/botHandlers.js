@@ -699,17 +699,16 @@ module.exports = function registerHandlers(bot, tenant) {
 
       const key = `${tenantId}_${ctx.from.id}`;
       userProductMap[key] = { _page: safePage };
-      pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
+      // Daftarkan SEMUA produk ke map supaya ketik nomor berapapun bisa dikenali
+      allProducts.forEach((p, i) => { userProductMap[key][String(i + 1)] = p.id; });
 
-      // Reply keyboard: angka produk + tombol atas (tetap seperti semula)
+      // Reply keyboard: tampilkan SEMUA nomor produk sekaligus (tidak per halaman)
       const keyRows = [];
-      const numKeys = pageItems.map((_, i) => String(start + i + 1));
-      for (let i = 0; i < numKeys.length; i += 6) keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
+      const allNumKeys = allProducts.map((_, i) => String(i + 1));
+      for (let i = 0; i < allNumKeys.length; i += 6) keyRows.push(allNumKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
       keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
 
-      // Baris navigasi bawah: tetap Menu & Populer di reply keyboard
-      const navReplyRow = [Markup.button.text('🏠 Menu'), Markup.button.text('🔥 Populer')];
-      keyRows.push(navReplyRow);
+      keyRows.push([Markup.button.text('🏠 Menu'), Markup.button.text('🔥 Populer')]);
 
       // Tombol Selanjutnya / Sebelumnya → inline keyboard (di bawah teks pesan)
       const inlineNavRow = [];
