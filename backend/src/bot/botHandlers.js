@@ -727,17 +727,14 @@ module.exports = function registerHandlers(bot, tenant) {
       const replyKbOpts  = Markup.keyboard(keyRows).resize();
       const sendOpts     = { parse_mode: 'Markdown', ...replyKbOpts, ...(inlineKb || {}) };
 
+      // Kirim pesan (baru atau ganti pesan lama)
+      const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
+
       if (editMode) {
-        // Edit teks pesan yang sama, reply keyboard tetap (tidak berubah)
-        await ctx.editMessageText(text, {
-          parse_mode: 'Markdown',
-          reply_markup: inlineKb ? inlineKb.reply_markup : { inline_keyboard: [] },
-        }).catch(() => {});
-        return;
+        // Hapus pesan lama, kirim pesan baru dengan reply keyboard yang sudah di-update
+        await ctx.deleteMessage().catch(() => {});
       }
 
-      // Kirim pesan baru (pertama kali)
-      const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
       if (tenantData?.banner_file_id) {
         try {
           await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...replyKbOpts, ...(inlineKb || {}) });
