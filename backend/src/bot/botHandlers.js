@@ -6,7 +6,7 @@ const QRCode     = require('qrcode');
 const PAGE_SIZE      = 9;
 const userProductMap = {};
 const userCart       = {};
-const userVoucherMap = {}; // menyimpan voucher yang sedang diinput
+const userVoucherMap = {};
 const PAKASIR_URL    = 'https://app.pakasir.com/api';
 
 const MAIN_KEYBOARD = Markup.keyboard([
@@ -18,7 +18,6 @@ const MAIN_KEYBOARD = Markup.keyboard([
 module.exports = function registerHandlers(bot, tenant) {
   const tenantId = tenant.id;
 
-  // ── /start ────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const telegramId = ctx.from.id.toString();
     const username   = ctx.from.username || null;
@@ -38,7 +37,6 @@ module.exports = function registerHandlers(bot, tenant) {
     );
   });
 
-  // ── /fileid ───────────────────────────────────────────────
   bot.command('fileid', async (ctx) => {
     const photo = ctx.message?.reply_to_message?.photo;
     if (!photo) return ctx.reply('📸 Cara pakai:\n1. Kirim gambar ke bot\n2. Reply gambar itu\n3. Ketik /fileid');
@@ -46,7 +44,6 @@ module.exports = function registerHandlers(bot, tenant) {
     ctx.reply(`✅ *File ID gambar:*\n\n\`${fileId}\`\n\n_Copy dan paste ke dashboard Settings._`, { parse_mode: 'Markdown' });
   });
 
-  // ── Saldo Saya ────────────────────────────────────────────
   bot.hears('💰 Saldo Saya', async (ctx) => {
     try {
       const { rows: [user] } = await pool.query('SELECT balance FROM users WHERE telegram_id=$1 AND tenant_id=$2', [ctx.from.id.toString(), tenantId]);
@@ -54,7 +51,6 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch { ctx.reply('Gagal mengambil saldo.'); }
   });
 
-  // ── Bantuan ───────────────────────────────────────────────
   bot.hears('📞 Bantuan', async (ctx) => {
     try {
       const { rows: [t] } = await pool.query(`SELECT help_text FROM tenants WHERE id=$1`, [tenantId]);
@@ -63,88 +59,64 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch { ctx.reply('Gagal memuat bantuan.'); }
   });
 
-  // ── Daftar Produk ─────────────────────────────────────────
   bot.hears('🛍 Daftar Produk', async (ctx) => { await showLoadingThenProductList(ctx); });
-  bot.hears('Selanjutnya ▶️', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, (userProductMap[key]?._page || 1) + 1); });
-  bot.hears('◀️ Sebelumnya', async (ctx) => { const key = `${tenantId}_${ctx.from.id}`; await showProductList(ctx, Math.max(1, (userProductMap[key]?._page || 1) - 1)); });
+
   bot.hears('🏠 Menu', async (ctx) => {
-  const telegramId = ctx.from.id.toString();
-  const username   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
-  const now        = new Date().toLocaleString('id-ID', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
+    const telegramId = ctx.from.id.toString();
+    const username   = ctx.from.username ? `@${ctx.from.username}` : ctx.from.first_name;
+    const now        = new Date().toLocaleString('id-ID', {
+      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta'
+    });
+    try {
+      const { rows: [user] } = await pool.query(
+        `SELECT u.balance, COUNT(o.id) FILTER (WHERE o.status='paid') AS total_transaksi
+         FROM users u LEFT JOIN orders o ON o.user_id=u.id AND o.tenant_id=$2
+         WHERE u.telegram_id=$1 AND u.tenant_id=$2 GROUP BY u.balance`,
+        [telegramId, tenantId]
+      );
+      const { rows: [botStats] } = await pool.query(
+        `SELECT COUNT(DISTINCT u.id) AS total_users,
+                COALESCE(SUM(o.qty) FILTER (WHERE o.status='paid'), 0) AS total_terjual
+         FROM users u LEFT JOIN orders o ON o.tenant_id=$1 WHERE u.tenant_id=$1`,
+        [tenantId]
+      );
+      await ctx.reply(
+        `👋 Halo ${username}\n🕐 ${now} WIB\n\n` +
+        `👤 *Informasi Pengguna:*\n` +
+        `├ ID: \`${telegramId}\`\n` +
+        `├ Nama: ${username}\n` +
+        `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
+        `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
+        `📊 *Statistik Bot:*\n` +
+        `├ Total Terjual: *${botStats?.total_terjual || 0} akun*\n` +
+        `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
+        { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+      );
+    } catch (err) { console.error('menu error:', err); await ctx.reply('Pilih menu:', MAIN_KEYBOARD); }
   });
-  try {
-    const { rows: [user] } = await pool.query(
-      `SELECT u.balance,
-              COUNT(o.id) FILTER (WHERE o.status='paid') AS total_transaksi,
-              COALESCE(SUM(o.amount) FILTER (WHERE o.status='paid'), 0) AS total_belanja
-       FROM users u
-       LEFT JOIN orders o ON o.user_id=u.id AND o.tenant_id=$2
-       WHERE u.telegram_id=$1 AND u.tenant_id=$2
-       GROUP BY u.balance`,
-      [telegramId, tenantId]
-    );
-
-    const { rows: [botStats] } = await pool.query(
-      `SELECT COUNT(DISTINCT u.id) AS total_users,
-              COALESCE(SUM(o.qty) FILTER (WHERE o.status='paid'), 0) AS total_terjual
-       FROM users u
-       LEFT JOIN orders o ON o.tenant_id=$1
-       WHERE u.tenant_id=$1`,
-      [tenantId]
-    );
-
-    await ctx.reply(
-      `👋 Halo ${username}\n` +
-      `🕐 ${now} WIB\n\n` +
-      `👤 *Informasi Pengguna:*\n` +
-      `├ ID: \`${telegramId}\`\n` +
-      `├ Nama: ${username}\n` +
-      `├ Total Transaksi: *${user?.total_transaksi || 0}x*\n` +
-      `└ Saldo: *Rp ${Number(user?.balance || 0).toLocaleString('id-ID')}*\n\n` +
-      `📊 *Statistik Bot:*\n` +
-      `└ Total Pengguna: *${botStats?.total_users || 0} user*`,
-      { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
-    );
-  } catch (err) {
-    console.error('menu error:', err);
-    await ctx.reply('Pilih menu:', MAIN_KEYBOARD);
-  }
-});
 
   bot.hears('🔥 Populer', async (ctx) => {
-  try {
-    const { rows } = await pool.query(
-      `SELECT p.name AS product_name,
-              pv.name AS variant_name,
-              COALESCE(SUM(o.qty), 0) AS total_sold
-       FROM orders o
-       JOIN products p ON p.id = o.product_id
-       LEFT JOIN product_variants pv ON pv.id = o.variant_id
-       WHERE o.tenant_id=$1 AND o.status='paid'
-       GROUP BY p.name, pv.name
-       ORDER BY total_sold DESC
-       LIMIT 5`,
-      [tenantId]
-    );
+    try {
+      const { rows } = await pool.query(
+        `SELECT p.name AS product_name, pv.name AS variant_name,
+                COALESCE(SUM(o.qty), 0) AS total_sold
+         FROM orders o JOIN products p ON p.id=o.product_id
+         LEFT JOIN product_variants pv ON pv.id=o.variant_id
+         WHERE o.tenant_id=$1 AND o.status='paid'
+         GROUP BY p.name, pv.name ORDER BY total_sold DESC LIMIT 5`,
+        [tenantId]
+      );
+      if (!rows.length) return ctx.reply('🔥 *Produk Populer*\n\nBelum ada data penjualan.', { parse_mode: 'Markdown' });
+      const list = rows.map((r, i) => {
+        const label = r.variant_name ? `${r.product_name} - ${r.variant_name}` : r.product_name;
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
+        return `${medal} *${label}*\n   📦 ${r.total_sold} terjual`;
+      }).join('\n\n');
+      await ctx.reply(`🔥 *Produk Terlaris*\n\n${list}`, { parse_mode: 'Markdown' });
+    } catch (err) { console.error('populer error:', err); ctx.reply('Gagal memuat produk populer.'); }
+  });
 
-    if (!rows.length) return ctx.reply('🔥 *Produk Populer*\n\nBelum ada data penjualan.', { parse_mode: 'Markdown' });
-
-    const list = rows.map((r, i) => {
-      const label = r.variant_name ? `${r.product_name} - ${r.variant_name}` : r.product_name;
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`;
-      return `${medal} *${label}*\n   📦 ${r.total_sold} terjual`;
-    }).join('\n\n');
-
-    await ctx.reply(`🔥 *Produk Terlaris*\n\n${list}`, { parse_mode: 'Markdown' });
-  } catch (err) {
-    console.error('populer error:', err);
-    ctx.reply('Gagal memuat produk populer.');
-  }
-});
-
-  // ── Pesanan Saya ──────────────────────────────────────────
   bot.hears('📦 Pesanan Saya', async (ctx) => {
     const telegramId = ctx.from.id.toString();
     try {
@@ -153,11 +125,9 @@ module.exports = function registerHandlers(bot, tenant) {
       const { rows: orders } = await pool.query(
         `SELECT o.id, o.amount, o.status, o.qty, o.created_at,
                 p.name AS product_name, pv.name AS variant_name
-         FROM orders o
-         JOIN products p ON p.id=o.product_id
+         FROM orders o JOIN products p ON p.id=o.product_id
          LEFT JOIN product_variants pv ON pv.id=o.variant_id
-         WHERE o.user_id=$1 AND o.tenant_id=$2
-         ORDER BY o.created_at DESC LIMIT 10`,
+         WHERE o.user_id=$1 AND o.tenant_id=$2 ORDER BY o.created_at DESC LIMIT 10`,
         [user.id, tenantId]
       );
       if (!orders.length) return ctx.reply(`📦 *Pesanan Saya*\n\nKamu belum memiliki pesanan.`, { parse_mode: 'Markdown' });
@@ -170,13 +140,11 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch (err) { console.error('pesanan saya error:', err); ctx.reply('Gagal memuat pesanan.'); }
   });
 
-  // ── Voucher List ──────────────────────────────────────────
   bot.hears('🎟️ Voucher', async (ctx) => {
     try {
       const { rows: vouchers } = await pool.query(
         `SELECT * FROM vouchers WHERE tenant_id=$1 AND is_active=true
-           AND (expired_at IS NULL OR expired_at > NOW())
-         ORDER BY created_at DESC`,
+           AND (expired_at IS NULL OR expired_at > NOW()) ORDER BY created_at DESC`,
         [tenantId]
       );
       if (!vouchers.length) return ctx.reply('🎟️ *Voucher*\n\nTidak ada voucher tersedia saat ini.', { parse_mode: 'Markdown' });
@@ -189,29 +157,22 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch (err) { console.error('voucher list error:', err); ctx.reply('Gagal memuat voucher.'); }
   });
 
-  // ── Input kode voucher (teks bebas) ──────────────────────
+  // Input voucher via teks
   bot.on('text', async (ctx, next) => {
-    const text     = ctx.message.text;
-    const vKey     = `${tenantId}_${ctx.from.id}`;
-    const pending  = userVoucherMap[vKey];
-
-    // Jika tidak sedang menunggu input voucher, lanjut ke handler lain
+    const text    = ctx.message.text;
+    const vKey    = `${tenantId}_${ctx.from.id}`;
+    const pending = userVoucherMap[vKey];
     if (!pending) return next();
-    // Jika teks mengandung spasi atau bukan kode, lewati
     if (text.includes(' ')) return next();
-
     if (text.toLowerCase() === 'batal') {
       delete userVoucherMap[vKey];
       return ctx.reply('❌ Input voucher dibatalkan.', MAIN_KEYBOARD);
     }
-
-    const code       = text.toUpperCase();
+    const code = text.toUpperCase();
     const telegramId = ctx.from.id.toString();
     try {
       const { rows: [user] } = await pool.query('SELECT id FROM users WHERE telegram_id=$1 AND tenant_id=$2', [telegramId, tenantId]);
       if (!user) return ctx.reply('Silakan kirim /start terlebih dahulu.');
-
-      // Ambil harga
       let price;
       if (pending.type === 'product') {
         const { rows: [p] } = await pool.query(`SELECT price FROM products WHERE id=$1`, [pending.id]);
@@ -220,37 +181,20 @@ module.exports = function registerHandlers(bot, tenant) {
         const { rows: [v] } = await pool.query(`SELECT price FROM product_variants WHERE id=$1`, [pending.id]);
         price = v?.price || 0;
       }
-      const qty    = userCart[vKey]?.qty || 1;
+      const qty = userCart[vKey]?.qty || 1;
       const amount = price * qty;
-
-      // Validasi voucher
       const { rows: [voucher] } = await pool.query(
         `SELECT * FROM vouchers WHERE code=$1 AND tenant_id=$2 AND is_active=true
            AND (expired_at IS NULL OR expired_at > NOW())`,
         [code, tenantId]
       );
-      if (!voucher) {
-        delete userVoucherMap[vKey];
-        return ctx.reply('❌ Kode voucher tidak valid atau sudah expired.');
-      }
-
-      // Cek pemakaian per user
-      const { rows: [usage] } = await pool.query(
-        `SELECT COUNT(*) AS cnt FROM voucher_usage WHERE voucher_id=$1 AND user_id=$2`,
-        [voucher.id, user.id]
-      );
-      if (parseInt(usage.cnt) >= voucher.max_per_user) {
-        delete userVoucherMap[vKey];
-        return ctx.reply('❌ Kamu sudah pernah menggunakan voucher ini.');
-      }
-
-      // Hitung diskon
+      if (!voucher) { delete userVoucherMap[vKey]; return ctx.reply('❌ Kode voucher tidak valid atau sudah expired.'); }
+      const { rows: [usage] } = await pool.query(`SELECT COUNT(*) AS cnt FROM voucher_usage WHERE voucher_id=$1 AND user_id=$2`, [voucher.id, user.id]);
+      if (parseInt(usage.cnt) >= voucher.max_per_user) { delete userVoucherMap[vKey]; return ctx.reply('❌ Kamu sudah pernah menggunakan voucher ini.'); }
       const discount    = voucher.type === 'percent' ? Math.round(amount * voucher.value / 100) : Math.min(voucher.value, amount);
       const finalAmount = amount - discount;
       const diskonText  = voucher.type === 'percent' ? `${voucher.value}%` : `Rp ${Number(voucher.value).toLocaleString('id-ID')}`;
-
       delete userVoucherMap[vKey];
-
       await ctx.reply(
         `✅ *Voucher Berhasil Diterapkan!*\n\n🎟️ Kode: *${voucher.code}*\n💸 Diskon: *${diskonText}*\n💰 Harga asal: Rp ${Number(amount).toLocaleString('id-ID')}\n✨ Harga setelah diskon: *Rp ${Number(finalAmount).toLocaleString('id-ID')}*\n\nPilih metode bayar:`,
         { parse_mode: 'Markdown', ...Markup.inlineKeyboard(
@@ -268,78 +212,67 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch (err) { console.error('voucher input error:', err); ctx.reply('Gagal memproses voucher.'); }
   });
 
-  // ── User ketik nomor produk ───────────────────────────────
   bot.hears(/^(\d+)$/, async (ctx) => {
     const num = ctx.message.text;
     const key = `${tenantId}_${ctx.from.id}`;
     if (userProductMap[key]?.[num]) await showProductDetail(ctx, userProductMap[key][num]);
   });
 
-  // ── Pilih varian ──────────────────────────────────────────
+  // Navigasi halaman inline
+  bot.action(/^page_(\d+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    await ctx.deleteMessage().catch(() => {});
+    await showProductList(ctx, parseInt(ctx.match[1]));
+  });
+
   bot.action(/^variant_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     await showVariantDetail(ctx, parseInt(ctx.match[1]), 1);
   });
 
-  // ── Qty varian ────────────────────────────────────────────
   bot.action(/^qty_(plus|minus)_v_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const dir = ctx.match[1], variantId = parseInt(ctx.match[2]);
     const cartKey = `${tenantId}_${ctx.from.id}`;
     if (!userCart[cartKey] || userCart[cartKey].variantId !== variantId) userCart[cartKey] = { variantId, qty: 1, type: 'variant' };
     const cart = userCart[cartKey];
-    const { rows: [v] } = await pool.query(
-      `SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count FROM product_variants pv LEFT JOIN stocks s ON s.variant_id=pv.id WHERE pv.id=$1 AND pv.tenant_id=$2 GROUP BY pv.id`,
-      [variantId, tenantId]
-    );
+    const { rows: [v] } = await pool.query(`SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count FROM product_variants pv LEFT JOIN stocks s ON s.variant_id=pv.id WHERE pv.id=$1 AND pv.tenant_id=$2 GROUP BY pv.id`, [variantId, tenantId]);
     const maxStock = parseInt(v?.stock_count || 0);
     if (dir === 'plus' && cart.qty < maxStock) cart.qty++;
     if (dir === 'minus' && cart.qty > 1) cart.qty--;
     try { await ctx.editMessageReplyMarkup(buildVariantKeyboard(variantId, cart.qty, maxStock > 0, null).reply_markup); } catch {}
   });
 
-  // ── Qty produk ────────────────────────────────────────────
   bot.action(/^qty_(plus|minus)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const dir = ctx.match[1], productId = parseInt(ctx.match[2]);
     const cartKey = `${tenantId}_${ctx.from.id}`;
     if (!userCart[cartKey] || userCart[cartKey].productId !== productId) userCart[cartKey] = { productId, qty: 1, type: 'product' };
     const cart = userCart[cartKey];
-    const { rows: [p] } = await pool.query(
-      `SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count FROM products p LEFT JOIN stocks s ON s.product_id=p.id WHERE p.id=$1 AND p.tenant_id=$2 GROUP BY p.id`,
-      [productId, tenantId]
-    );
+    const { rows: [p] } = await pool.query(`SELECT COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count FROM products p LEFT JOIN stocks s ON s.product_id=p.id WHERE p.id=$1 AND p.tenant_id=$2 GROUP BY p.id`, [productId, tenantId]);
     const maxStock = parseInt(p?.stock_count || 0);
     if (dir === 'plus' && cart.qty < maxStock) cart.qty++;
     if (dir === 'minus' && cart.qty > 1) cart.qty--;
     try { await ctx.editMessageReplyMarkup(buildProductKeyboard(productId, cart.qty, maxStock > 0).reply_markup); } catch {}
   });
 
-  // ── Pakai Voucher (dari tombol) ───────────────────────────
   bot.action(/^voucher_p_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const productId = parseInt(ctx.match[1]);
-    userVoucherMap[`${tenantId}_${ctx.from.id}`] = { type: 'product', id: productId };
+    userVoucherMap[`${tenantId}_${ctx.from.id}`] = { type: 'product', id: parseInt(ctx.match[1]) };
     await ctx.reply(`🎟️ *Masukkan Kode Voucher*\n\nKetik kode voucher kamu:\n_(Ketik "batal" untuk membatalkan)_`, { parse_mode: 'Markdown' });
   });
 
   bot.action(/^voucher_v_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const variantId = parseInt(ctx.match[1]);
-    userVoucherMap[`${tenantId}_${ctx.from.id}`] = { type: 'variant', id: variantId };
+    userVoucherMap[`${tenantId}_${ctx.from.id}`] = { type: 'variant', id: parseInt(ctx.match[1]) };
     await ctx.reply(`🎟️ *Masukkan Kode Voucher*\n\nKetik kode voucher kamu:\n_(Ketik "batal" untuk membatalkan)_`, { parse_mode: 'Markdown' });
   });
 
-  // ── Beli varian ───────────────────────────────────────────
   bot.action(/^buy_v_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const variantId = parseInt(ctx.match[1]);
-    const cartKey   = `${tenantId}_${ctx.from.id}`;
-    const qty       = userCart[cartKey]?.qty || 1;
-    const { rows: [variant] } = await pool.query(
-      `SELECT pv.*, p.name AS product_name FROM product_variants pv JOIN products p ON p.id=pv.product_id WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
-      [variantId, tenantId]
-    );
+    const qty       = userCart[`${tenantId}_${ctx.from.id}`]?.qty || 1;
+    const { rows: [variant] } = await pool.query(`SELECT pv.*, p.name AS product_name FROM product_variants pv JOIN products p ON p.id=pv.product_id WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`, [variantId, tenantId]);
     if (!variant) return ctx.answerCbQuery('Varian tidak ditemukan.', { show_alert: true });
     await ctx.editMessageText(
       `💳 *Pilih Metode Pembayaran*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(variant.price * qty).toLocaleString('id-ID')}*\n\nPilih metode bayar:`,
@@ -351,12 +284,10 @@ module.exports = function registerHandlers(bot, tenant) {
     ).catch(() => {});
   });
 
-  // ── Beli produk ───────────────────────────────────────────
   bot.action(/^buy_p_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const productId = parseInt(ctx.match[1]);
-    const cartKey   = `${tenantId}_${ctx.from.id}`;
-    const qty       = userCart[cartKey]?.qty || 1;
+    const qty       = userCart[`${tenantId}_${ctx.from.id}`]?.qty || 1;
     const { rows: [product] } = await pool.query(`SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`, [productId, tenantId]);
     if (!product) return ctx.answerCbQuery('Produk tidak ditemukan.', { show_alert: true });
     await ctx.editMessageText(
@@ -369,41 +300,29 @@ module.exports = function registerHandlers(bot, tenant) {
     ).catch(() => {});
   });
 
-  // ── Bayar saldo varian (dengan/tanpa voucher) ─────────────
   bot.action(/^pay_saldo_v_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const variantId  = parseInt(ctx.match[1]);
-    const qty        = parseInt(ctx.match[2]);
-    const voucherId  = ctx.match[3] ? parseInt(ctx.match[3]) : null;
-    const discount   = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
+    const variantId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
+    const voucherId = ctx.match[3] ? parseInt(ctx.match[3]) : null;
+    const discount  = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
     const telegramId = ctx.from.id.toString();
     try {
       const { rows: [user] } = await pool.query('SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2', [telegramId, tenantId]);
       if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
-      const { rows: [variant] } = await pool.query(
-        `SELECT pv.*, p.name AS product_name FROM product_variants pv JOIN products p ON p.id=pv.product_id WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`,
-        [variantId, tenantId]
-      );
+      const { rows: [variant] } = await pool.query(`SELECT pv.*, p.name AS product_name FROM product_variants pv JOIN products p ON p.id=pv.product_id WHERE pv.id=$1 AND pv.tenant_id=$2 AND pv.is_active=true`, [variantId, tenantId]);
       if (!variant) return ctx.editMessageText('Varian tidak ditemukan.').catch(() => {});
       const total = (variant.price * qty) - discount;
-      if ((user.balance||0) < total) return ctx.editMessageText(
-        `❌ *Saldo tidak cukup!*\n\n💰 Saldo: *Rp ${Number(user.balance||0).toLocaleString('id-ID')}*\n🧾 Total: *Rp ${Number(total).toLocaleString('id-ID')}*`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Kembali','cancel_buy')]]) }
-      ).catch(() => {});
+      if ((user.balance||0) < total) return ctx.editMessageText(`❌ *Saldo tidak cukup!*\n\n💰 Saldo: *Rp ${Number(user.balance||0).toLocaleString('id-ID')}*\n🧾 Total: *Rp ${Number(total).toLocaleString('id-ID')}*`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Kembali','cancel_buy')]]) }).catch(() => {});
       const { rows: [sc] } = await pool.query(`SELECT COUNT(*) AS cnt FROM stocks WHERE variant_id=$1 AND tenant_id=$2 AND status='available'`, [variantId, tenantId]);
       if (parseInt(sc.cnt) < qty) return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt}`).catch(() => {});
       const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
       await ctx.editMessageText(
         `✅ *Konfirmasi Pembelian*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n💳 Saldo setelah bayar: *Rp ${Number((user.balance||0)-total).toLocaleString('id-ID')}*\n\nLanjutkan?`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-          [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_v_${variantId}_${qty}_${voucherId||0}_${discount}`)],
-          [Markup.button.callback('❌ Batal','cancel_buy')],
-        ]) }
+        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('✅ Ya, Bayar Sekarang',`confirm_saldo_v_${variantId}_${qty}_${voucherId||0}_${discount}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]) }
       ).catch(() => {});
     } catch (err) { console.error('pay_saldo_v error:', err); ctx.editMessageText('Terjadi kesalahan.').catch(() => {}); }
   });
 
-  // ── Konfirmasi saldo varian ───────────────────────────────
   bot.action(/^confirm_saldo_v_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery('Memproses...'); } catch {}
     const variantId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
@@ -418,14 +337,8 @@ module.exports = function registerHandlers(bot, tenant) {
       const total = (variant.price * qty) - discount;
       if ((user.balance||0) < total) { await client.query('ROLLBACK'); return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {}); }
       await client.query('UPDATE users SET balance=balance-$1 WHERE id=$2', [total, user.id]);
-      const { rows: [order] } = await client.query(
-        `INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`,
-        [user.id, variant.product_id, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]
-      );
-      // Catat pemakaian voucher
-      if (voucherId > 0) {
-        await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
-      }
+      const { rows: [order] } = await client.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`, [user.id, variant.product_id, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]);
+      if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
@@ -434,13 +347,11 @@ module.exports = function registerHandlers(bot, tenant) {
     finally { client.release(); }
   });
 
-  // ── Bayar saldo produk (dengan/tanpa voucher) ─────────────
   bot.action(/^pay_saldo_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const productId  = parseInt(ctx.match[1]);
-    const qty        = parseInt(ctx.match[2]);
-    const voucherId  = ctx.match[3] ? parseInt(ctx.match[3]) : null;
-    const discount   = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
+    const productId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
+    const voucherId = ctx.match[3] ? parseInt(ctx.match[3]) : null;
+    const discount  = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
     const telegramId = ctx.from.id.toString();
     try {
       const { rows: [user] } = await pool.query('SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2', [telegramId, tenantId]);
@@ -448,24 +359,17 @@ module.exports = function registerHandlers(bot, tenant) {
       const { rows: [product] } = await pool.query(`SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`, [productId, tenantId]);
       if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
       const total = (product.price * qty) - discount;
-      if ((user.balance||0) < total) return ctx.editMessageText(
-        `❌ *Saldo tidak cukup!*\n\n💰 Saldo: *Rp ${Number(user.balance||0).toLocaleString('id-ID')}*\n🧾 Total: *Rp ${Number(total).toLocaleString('id-ID')}*`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Kembali','cancel_buy')]]) }
-      ).catch(() => {});
+      if ((user.balance||0) < total) return ctx.editMessageText(`❌ *Saldo tidak cukup!*\n\n💰 Saldo: *Rp ${Number(user.balance||0).toLocaleString('id-ID')}*\n🧾 Total: *Rp ${Number(total).toLocaleString('id-ID')}*`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Kembali','cancel_buy')]]) }).catch(() => {});
       const { rows: [sc] } = await pool.query(`SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available' AND variant_id IS NULL`, [productId, tenantId]);
       if (parseInt(sc.cnt) < qty) return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt}`).catch(() => {});
       const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
       await ctx.editMessageText(
         `✅ *Konfirmasi Pembelian*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n💳 Saldo setelah bayar: *Rp ${Number((user.balance||0)-total).toLocaleString('id-ID')}*\n\nLanjutkan?`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([
-          [Markup.button.callback('✅ Ya, Bayar Sekarang', `confirm_saldo_p_${productId}_${qty}_${voucherId||0}_${discount}`)],
-          [Markup.button.callback('❌ Batal','cancel_buy')],
-        ]) }
+        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('✅ Ya, Bayar Sekarang',`confirm_saldo_p_${productId}_${qty}_${voucherId||0}_${discount}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]) }
       ).catch(() => {});
     } catch (err) { console.error('pay_saldo_p error:', err); ctx.editMessageText('Terjadi kesalahan.').catch(() => {}); }
   });
 
-  // ── Konfirmasi saldo produk ───────────────────────────────
   bot.action(/^confirm_saldo_p_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery('Memproses...'); } catch {}
     const productId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
@@ -480,13 +384,8 @@ module.exports = function registerHandlers(bot, tenant) {
       const total = (product.price * qty) - discount;
       if ((user.balance||0) < total) { await client.query('ROLLBACK'); return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {}); }
       await client.query('UPDATE users SET balance=balance-$1 WHERE id=$2', [total, user.id]);
-      const { rows: [order] } = await client.query(
-        `INSERT INTO orders (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,'paid',$5,NOW(),$6) RETURNING *`,
-        [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]
-      );
-      if (voucherId > 0) {
-        await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
-      }
+      const { rows: [order] } = await client.query(`INSERT INTO orders (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,'paid',$5,NOW(),$6) RETURNING *`, [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]);
+      if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
@@ -495,7 +394,6 @@ module.exports = function registerHandlers(bot, tenant) {
     finally { client.release(); }
   });
 
-  // ── QRIS varian (dengan/tanpa voucher) ───────────────────
   bot.action(/^pay_qris_v_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const variantId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
@@ -518,14 +416,11 @@ module.exports = function registerHandlers(bot, tenant) {
       const { createPayment } = require('../services/paymentService');
       const config = gateway === 'pakasir' ? { gateway: 'pakasir', api_key: tenantConfig.pakasir_api_key, project_slug: tenantConfig.pakasir_project_slug } : { gateway: 'tripay', api_key: tenantConfig.tripay_api_key, private_key: tenantConfig.tripay_private_key, merchant_code: tenantConfig.tripay_merchant_code, mode: tenantConfig.tripay_mode || 'sandbox' };
       const result = await createPayment(config, { orderId: paymentOrderId, amount: total, productName: `${variant.product_name} - ${variant.name} x${qty}`, customerName: ctx.from.first_name || 'Customer' });
+      const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
       if (gateway === 'pakasir') {
-        const { rows: [newOrder] } = await pool.query(
-          `INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING id`,
-          [user.id, variant.product_id, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]
-        );
+        const { rows: [newOrder] } = await pool.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING id`, [user.id, variant.product_id, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]);
         if (voucherId > 0) await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
-        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *5 menit*`;
-        const diskonInfo  = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
+        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ Berlaku *15 menit*`;
         const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(result.total_payment||total).toLocaleString('id-ID')}*\n${expiredText}\n\n📲 *Cara Bayar QRIS:*\n1. Buka e-wallet (GoPay, OVO, Dana, dll)\n2. Scan gambar QR di atas\n3. Atau pilih *Salin Kode* jika tidak bisa scan`;
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('📋 Salin Kode QRIS',`copy_qris_${newOrder.id}`)],[Markup.button.callback('✅ Saya Sudah Bayar',`check_pakasir_${newOrder.id}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]);
         try {
@@ -536,12 +431,11 @@ module.exports = function registerHandlers(bot, tenant) {
         } catch { await ctx.deleteMessage().catch(() => {}); await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard }).catch(() => {}); }
       } else {
         await pool.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8)`, [user.id, variant.product_id, variantId, paymentOrderId, result.payment_url, total, qty, tenantId]);
-        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *5 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
+        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *15 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
       }
     } catch (err) { console.error('pay_qris_v error:', err); ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {}); }
   });
 
-  // ── QRIS produk (dengan/tanpa voucher) ───────────────────
   bot.action(/^pay_qris_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     const productId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
@@ -564,14 +458,11 @@ module.exports = function registerHandlers(bot, tenant) {
       const { createPayment } = require('../services/paymentService');
       const config = gateway === 'pakasir' ? { gateway: 'pakasir', api_key: tenantConfig.pakasir_api_key, project_slug: tenantConfig.pakasir_project_slug } : { gateway: 'tripay', api_key: tenantConfig.tripay_api_key, private_key: tenantConfig.tripay_private_key, merchant_code: tenantConfig.tripay_merchant_code, mode: tenantConfig.tripay_mode || 'sandbox' };
       const result = await createPayment(config, { orderId: paymentOrderId, amount: total, productName: `${product.name} x${qty}`, customerName: ctx.from.first_name || 'Customer' });
+      const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
       if (gateway === 'pakasir') {
-        const { rows: [newOrder] } = await pool.query(
-          `INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7) RETURNING id`,
-          [user.id, productId, paymentOrderId, result.payment_number, total, qty, tenantId]
-        );
+        const { rows: [newOrder] } = await pool.query(`INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7) RETURNING id`, [user.id, productId, paymentOrderId, result.payment_number, total, qty, tenantId]);
         if (voucherId > 0) await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
-        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ berlaku *5 menit*`;
-        const diskonInfo  = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
+        const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ Berlaku *15 menit*`;
         const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(result.total_payment||total).toLocaleString('id-ID')}*\n${expiredText}\n\n📲 *Cara Bayar QRIS:*\n1. Buka e-wallet (GoPay, OVO, Dana, dll)\n2. Scan gambar QR di atas\n3. Atau pilih *Salin Kode* jika tidak bisa scan`;
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('📋 Salin Kode QRIS',`copy_qris_${newOrder.id}`)],[Markup.button.callback('✅ Saya Sudah Bayar',`check_pakasir_${newOrder.id}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]);
         try {
@@ -582,23 +473,20 @@ module.exports = function registerHandlers(bot, tenant) {
         } catch { await ctx.deleteMessage().catch(() => {}); await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard }).catch(() => {}); }
       } else {
         await pool.query(`INSERT INTO orders (user_id, product_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,'pending',$6,$7)`, [user.id, productId, paymentOrderId, result.payment_url, total, qty, tenantId]);
-        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *5 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
+        await ctx.editMessageText(`🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nKlik tombol di bawah untuk membayar.\n⏰ Link berlaku *15 menit*.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.url('💳 Bayar Sekarang', result.payment_url)]]) }).catch(() => {});
       }
     } catch (err) { console.error('pay_qris_p error:', err); ctx.editMessageText(`❌ Terjadi kesalahan: ${err.message}`).catch(() => {}); }
   });
 
-  // ── Salin QRIS ────────────────────────────────────────────
   bot.action(/^copy_qris_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
-    const orderId = parseInt(ctx.match[1]);
     try {
-      const { rows: [order] } = await pool.query(`SELECT payment_url FROM orders WHERE id=$1 AND tenant_id=$2`, [orderId, tenantId]);
+      const { rows: [order] } = await pool.query(`SELECT payment_url FROM orders WHERE id=$1 AND tenant_id=$2`, [parseInt(ctx.match[1]), tenantId]);
       if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
       await ctx.reply(`📋 *Kode QRIS:*\n\n\`${order.payment_url}\`\n\n_Paste kode ini di e-wallet kamu._`, { parse_mode: 'Markdown' });
     } catch (err) { console.error('copy_qris error:', err.message); }
   });
 
-  // ── Cek Pakasir ───────────────────────────────────────────
   bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery('Mengecek pembayaran...'); } catch {}
     const orderId = parseInt(ctx.match[1]);
@@ -606,6 +494,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const { rows: [order] } = await pool.query(`SELECT o.*, u.telegram_id FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.tenant_id=$2`, [orderId, tenantId]);
       if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
       if (order.status === 'paid') return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
+      if (order.status === 'expired') return ctx.answerCbQuery('⏰ Pesanan sudah expired. Buat pesanan baru.', { show_alert: true });
       const { rows: [tenantConfig] } = await pool.query(`SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, [tenantId]);
       let checkResp;
       const endpoints = [`${PAKASIR_URL}/transactionstatus`,`${PAKASIR_URL}/transaction/check`,`${PAKASIR_URL}/transaction/status`,`${PAKASIR_URL}/transactioncheck`];
@@ -624,7 +513,6 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch (err) { console.error('check_pakasir error:', err); ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true }); }
   });
 
-  // ── Cancel ────────────────────────────────────────────────
   bot.action('cancel_buy', async (ctx) => {
     try { await ctx.answerCbQuery('Dibatalkan'); } catch {}
     try {
@@ -655,15 +543,7 @@ module.exports = function registerHandlers(bot, tenant) {
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
-    const frames = [
-      '⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%',
-      '🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%',
-      '🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜ 30%',
-      '🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜ 50%',
-      '🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜ 70%',
-      '🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜ 90%',
-      '🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦 100%',
-    ];
+    const frames = ['⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%','🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%','🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜ 30%','🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜ 50%','🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜ 70%','🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜ 90%','🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦 100%'];
     const msg = await ctx.reply(`⏳ Memuat produk...\n${frames[0]}`);
     for (let i = 1; i < frames.length; i++) {
       await new Promise(r => setTimeout(r, 200));
@@ -682,34 +562,40 @@ module.exports = function registerHandlers(bot, tenant) {
         [tenantId]
       );
       if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
+
       const totalPages = Math.ceil(allProducts.length / PAGE_SIZE);
       const safePage   = Math.min(Math.max(page, 1), totalPages);
       const start      = (safePage - 1) * PAGE_SIZE;
       const pageItems  = allProducts.slice(start, start + PAGE_SIZE);
+
       const key = `${tenantId}_${ctx.from.id}`;
       userProductMap[key] = { _page: safePage };
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
+
+      // Reply keyboard
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
       for (let i = 0; i < numKeys.length; i += 6) keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
-      // Tombol Daftar Produk & Voucher di atas angka
-    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+      keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+      keyRows.push([Markup.button.text('🏠 Menu'), Markup.button.text('🔥 Populer')]);
 
-      const navRow = [];
-      if (safePage > 1) navRow.push(Markup.button.text('◀️ Sebelumnya'));
-      if (safePage < totalPages) navRow.push(Markup.button.text('Selanjutnya ▶️'));
-      navRow.push(Markup.button.text('🏠 Menu'));
-      navRow.push(Markup.button.text('🔥 Populer'));
-      keyRows.push(navRow);
+      // Inline keyboard navigasi halaman
+      const inlineNav = [];
+      if (safePage > 1)          inlineNav.push(Markup.button.callback('◀️', `page_${safePage - 1}`));
+      inlineNav.push(Markup.button.callback(`${safePage} / ${totalPages}`, 'qty_noop'));
+      if (safePage < totalPages) inlineNav.push(Markup.button.callback('▶️', `page_${safePage + 1}`));
+      const inlineKeyboard = totalPages > 1 ? Markup.inlineKeyboard([inlineNav]) : {};
+
       const divider = `┊ - - - - - - - - - - - - - - - -`;
-      const lines = pageItems.map((p, i) => { const stock = parseInt(p.stock_count); return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`; }).join('\n');
-      const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
+      const lines   = pageItems.map((p, i) => { const stock = parseInt(p.stock_count); return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`; }).join('\n');
+      const text    = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
+
       const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
       if (tenantData?.banner_file_id) {
-        try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
-        catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
+        try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
+        catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
       } else {
-        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
+        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard });
       }
     } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
   }
@@ -717,7 +603,8 @@ module.exports = function registerHandlers(bot, tenant) {
   async function showProductDetail(ctx, productId) {
     try {
       const { rows: [product] } = await pool.query(
-        `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+        `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
+                COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
          FROM products p LEFT JOIN stocks s ON s.product_id=p.id
          WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true GROUP BY p.id`,
         [productId, tenantId]
@@ -740,8 +627,8 @@ module.exports = function registerHandlers(bot, tenant) {
         variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
         await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(variantButtons) });
       } else {
-        const stock = parseInt(product.stock_count || 0);
-        const sold  = parseInt(product.sold_count || 0);
+        const stock   = parseInt(product.stock_count || 0);
+        const sold    = parseInt(product.sold_count || 0);
         const inStock = stock > 0;
         userCart[`${tenantId}_${ctx.from.id}`] = { productId, qty: 1, type: 'product' };
         const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
@@ -762,8 +649,8 @@ module.exports = function registerHandlers(bot, tenant) {
         [variantId, tenantId]
       );
       if (!variant) return ctx.reply('Varian tidak ditemukan.');
-      const stock = parseInt(variant.stock_count || 0);
-      const sold  = parseInt(variant.sold_count || 0);
+      const stock   = parseInt(variant.stock_count || 0);
+      const sold    = parseInt(variant.sold_count || 0);
       const inStock = stock > 0;
       userCart[`${tenantId}_${ctx.from.id}`] = { variantId, qty, type: 'variant' };
       const text = `🏷 *${variant.product_name} - ${variant.name}*\n\n📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
@@ -786,7 +673,7 @@ module.exports = function registerHandlers(bot, tenant) {
       [Markup.button.callback('➖',`qty_minus_v_${variantId}`), Markup.button.callback(`  ${qty}  `,'qty_noop'), Markup.button.callback('➕',`qty_plus_v_${variantId}`)],
       inStock ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x'+qty+')' : ''} Sekarang`,`buy_v_${variantId}`)] : [Markup.button.callback('❌ Stok Habis','no_stock')],
       [Markup.button.callback('🎟️ Pakai Voucher', `voucher_v_${variantId}`)],
-      [Markup.button.callback('◀️ Kembali ke Pilihan',productId ? `back_to_product_${productId}` : 'back_to_list')],
+      [Markup.button.callback('◀️ Kembali ke Pilihan', productId ? `back_to_product_${productId}` : 'back_to_list')],
     ]);
   }
 };
