@@ -716,11 +716,19 @@ module.exports = function registerHandlers(bot, tenant) {
     const inlineKeyboard = navRow.length > 0 ? Markup.inlineKeyboard([navRow]) : {};
 
     // Format teks seperti screenshot
-    const lines = pageItems.map((p, i) => `${start + i + 1}. ${p.name}`).join('\n');
-    const text  =
-      `📦 *Daftar Produk*\n\n${lines}\n\n` +
-      `📄 Halaman ${safePage}/${totalPages}\n` +
-      `💡 Masukkan nomor untuk lanjut.`;
+    const lines = pageItems.map((p, i) => {
+      const stock = parseInt(p.stock_count);
+      const emoji = stock > 0 ? '✅' : '❌';
+      return `${emoji} ${start + i + 1} ${p.name} [ ${stock} ]`;
+    }).join('\n');
+    const text =
+  `╭ - - - - - - - - - - - - - - - - ╮\n` +
+  `┊  LIST PRODUK\n` +
+  `┊  page ${safePage} / ${totalPages}\n` +
+  `┊ - - - - - - - - - - - - - - - -\n` +
+  `${lines}\n` +
+  `╰ - - - - - - - - - - - - - - - - ╯\n\n` +
+  `_Ketik nomor untuk melihat detail._`;
 
     if (messageId) {
       // Edit pesan lama (dari inline button)
