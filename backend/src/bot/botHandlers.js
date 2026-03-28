@@ -643,6 +643,12 @@ module.exports = function registerHandlers(bot, tenant) {
     await showProductList(ctx, userProductMap[key]?._page || 1);
   });
 
+  bot.action(/^page_(\d+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const msgId = ctx.callbackQuery.message?.message_id;
+    await showProductList(ctx, parseInt(ctx.match[1]), msgId);
+  });
+
   bot.action(/^back_to_product_(\d+)$/, async (ctx) => {
     try { await ctx.answerCbQuery(); } catch {}
     await ctx.deleteMessage().catch(() => {});
@@ -673,47 +679,68 @@ module.exports = function registerHandlers(bot, tenant) {
     await showProductList(ctx, 1);
   }
 
-  async function showProductList(ctx, page) {
-    try {
-      const { rows: allProducts } = await pool.query(
-        `SELECT p.id, p.name, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM products p LEFT JOIN stocks s ON s.product_id=p.id
-         WHERE p.is_active=true AND p.tenant_id=$1 GROUP BY p.id ORDER BY p.id`,
-        [tenantId]
-      );
-      if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
-      const totalPages = Math.ceil(allProducts.length / PAGE_SIZE);
-      const safePage   = Math.min(Math.max(page, 1), totalPages);
-      const start      = (safePage - 1) * PAGE_SIZE;
-      const pageItems  = allProducts.slice(start, start + PAGE_SIZE);
-      const key = `${tenantId}_${ctx.from.id}`;
-      userProductMap[key] = { _page: safePage };
-      pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
-      const keyRows = [];
-      const numKeys = pageItems.map((_, i) => String(start + i + 1));
-      for (let i = 0; i < numKeys.length; i += 5) keyRows.push(numKeys.slice(i, i + 5).map(n => Markup.button.text(n)));
-// Tambah sisa angka halaman berikutnya juga
-      // Tombol Daftar Produk & Voucher di atas angka
-    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+  async function showProductList(ctx, page, messageId = null) {
+  try {
+    const { rows: allProducts } = await pool.query(
+      `SELECT p.id, p.name, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+       FROM products p LEFT JOIN stocks s ON s.product_id=p.id
+       WHERE p.is_active=true AND p.tenant_id=$1 GROUP BY p.id ORDER BY p.id`,
+      [tenantId]
+    );
+    if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
 
-      const navRow = [];
-      if (safePage > 1) navRow.push(Markup.button.text('◀️ Sebelumnya'));
-      if (safePage < totalPages) navRow.push(Markup.button.text('Selanjutnya ▶️'));
-      navRow.push(Markup.button.text('🏠 Menu'));
-      navRow.push(Markup.button.text('🔥 Populer'));
-      keyRows.push(navRow);
-      const divider = `┊ - - - - - - - - - - - - - - - -`;
-      const lines = pageItems.map((p, i) => { const stock = parseInt(p.stock_count); return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`; }).join('\n');
-      const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
-      const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
-      if (tenantData?.banner_file_id) {
-        try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
-        catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() }); }
-      } else {
-        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize() });
-      }
-    } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
-  }
+    const PAGE = 9;
+    const totalPages = Math.ceil(allProducts.length / PAGE);
+    const safePage   = Math.min(Math.max(page, 1), totalPages);
+    const start      = (safePage - 1) * PAGE;
+    const pageItems  = allProducts.slice(start, start + PAGE);
+
+    // Simpan semua produk di map (semua halaman)
+    const key = `${tenantId}_${ctx.from.id}`;
+    userProductMap[key] = { _page: safePage };
+    allProducts.forEach((p, i) => { userProductMap[key][String(i + 1)] = p.id; });
+
+    // Reply keyboard — semua angka + menu
+    const keyRows = [];
+    const allNums = allProducts.map((_, i) => String(i + 1));
+    for (let i = 0; i < allNums.length; i += 5) keyRows.push(allNums.slice(i, i + 5).map(n => Markup.button.text(n)));
+    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+    keyRows.push([Markup.button.text('🏠 Menu'), Markup.button.text('🔥 Populer')]);
+
+    // Inline keyboard — navigasi halaman (edit pesan)
+    const inlineNav = [];
+    if (safePage > 1)          inlineNav.push(Markup.button.callback('◀️ Sebelumnya', `page_${safePage - 1}`));
+    inlineNav.push(Markup.button.callback(`${safePage} / ${totalPages}`, 'qty_noop'));
+    if (safePage < totalPages) inlineNav.push(Markup.button.callback('Selanjutnya ▶️', `page_${safePage + 1}`));
+    const inlineKeyboard = totalPages > 1 ? Markup.inlineKeyboard([inlineNav]) : {};
+
+    const divider = `┊ - - - - - - - - - - - - - - - -`;
+    const lines   = pageItems.map((p, i) => {
+      const stock = parseInt(p.stock_count);
+      return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`;
+    }).join('\n');
+    const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
+
+    // Kalau ada messageId → edit pesan lama (dari inline button)
+    if (messageId) {
+      try {
+        await ctx.telegram.editMessageText(ctx.chat.id, messageId, null, text, {
+          parse_mode: 'Markdown', ...inlineKeyboard
+        });
+        return;
+      } catch {}
+    }
+
+    // Kirim pesan baru
+    const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
+    if (tenantData?.banner_file_id) {
+      try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
+      catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
+    } else {
+      await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard });
+    }
+  } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
+}
 
   async function showProductDetail(ctx, productId) {
     try {
