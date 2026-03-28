@@ -721,11 +721,11 @@ module.exports = function registerHandlers(bot, tenant) {
       const emoji = stock > 0 ? '✅' : '❌';
       const number = String(start + i + 1).padStart(2, ' ');   // nomor rata kanan
 
-      return `┊ ${emoji} ${number} ${p.name} [ ${stock} ]`;
+      return `┊ ${emoji} ${number} ${p.name} [ (${stock}) ]`;
     }).join('\n');
 
 const text = `╭ ───────────────────────────── ╮
-┊         LIST PRODUK          
+┊ 🛒 LIST PRODUK          
 ┊ Page ${safePage} / ${totalPages}
 ┊ ─────────────────────────────
 ${lines}
