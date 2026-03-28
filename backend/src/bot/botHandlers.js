@@ -710,9 +710,8 @@ module.exports = function registerHandlers(bot, tenant) {
     // Inline keyboard — navigasi halaman (edit pesan)
     const inlineNav = [];
     if (safePage > 1)          inlineNav.push(Markup.button.callback('◀️ Sebelumnya', `page_${safePage - 1}`));
-    inlineNav.push(Markup.button.callback(`${safePage} / ${totalPages}`, 'qty_noop'));
     if (safePage < totalPages) inlineNav.push(Markup.button.callback('Selanjutnya ▶️', `page_${safePage + 1}`));
-    const inlineKeyboard = totalPages > 1 ? Markup.inlineKeyboard([inlineNav]) : {};
+    const inlineKeyboard = inlineNav.length > 0 ? Markup.inlineKeyboard([inlineNav]) : {};
 
     const divider = `┊ - - - - - - - - - - - - - - - -`;
     const lines   = pageItems.map((p, i) => {
@@ -722,13 +721,9 @@ module.exports = function registerHandlers(bot, tenant) {
     const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
 
     // Kalau ada messageId → edit pesan lama (dari inline button)
+    // Kalau dari inline button → hapus pesan lama, kirim baru dengan keyboard lengkap
     if (messageId) {
-      try {
-        await ctx.telegram.editMessageText(ctx.chat.id, messageId, null, text, {
-          parse_mode: 'Markdown', ...inlineKeyboard
-        });
-        return;
-      } catch {}
+     await ctx.telegram.deleteMessage(ctx.chat.id, messageId).catch(() => {});
     }
 
     // Kirim pesan baru
