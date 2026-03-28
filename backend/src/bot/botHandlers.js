@@ -727,11 +727,11 @@ module.exports = function registerHandlers(bot, tenant) {
     }).join('\n');
 
     const text = `╭ ───────────────────────────── ╮
-    ┊         LIST PRODUK          
-    ┊ Page ${safePage} / ${totalPages}
-    ┊ ─────────────────────────────
+  ┊         LIST PRODUK          
+  ┊ Page ${safePage} / ${totalPages}
+  ┊ ─────────────────────────────
     ${lines}
-    ╰ ───────────────────────────── ╯
+  ╰ ───────────────────────────── ╯
 
     _Ketik nomor untuk melihat detail._`;
 
