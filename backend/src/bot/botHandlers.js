@@ -717,24 +717,25 @@ module.exports = function registerHandlers(bot, tenant) {
 
     // Format teks seperti screenshot
     const lines = pageItems.map((p, i) => {
-      const stock = parseInt(p.stock_count) || 0;
-      const check = stock > 0 ? '✅' : '❌';
-      const number = start + i + 1;
+  const stock = parseInt(p.stock_count) || 0;
+  const check = stock > 0 ? '✅' : '❌';
+  const number = start + i + 1;
 
-      let name = p.name;
-      if (name.length > 25) {
-       name = name.substring(0, 22) + '..';
-      }
+  // Potong nama produk supaya tidak terlalu panjang di HP
+  let name = p.name.trim();
+  if (name.length > 26) {
+    name = name.substring(0, 23) + '..';
+  }
 
-      return `${check} ${number} ${name} (${stock})`;
-    }).join('\n');
+  return `${check} ${number} ${name} (${stock})`;
+}).join('\n');
 
-    const text = `🛒 LIST PRODUK
-    Page ${safePage} / ${totalPages}
+const text = `🛒 LIST PRODUK
+Page ${safePage} / ${totalPages}
 
-    ${lines}
+${lines}
 
-    _Ketik nomor untuk melihat detail._`;
+_Ketik nomor untuk melihat detail._`;
 
     if (messageId) {
       // Edit pesan lama (dari inline button)
