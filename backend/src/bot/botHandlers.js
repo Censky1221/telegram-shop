@@ -741,17 +741,19 @@ module.exports = function registerHandlers(bot, tenant) {
 
     // Kirim pesan baru
     const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
-    if (tenantData?.banner_file_id) {
-      try {
-        await ctx.replyWithPhoto(tenantData.banner_file_id, {
-          caption: text, parse_mode: 'Markdown',
-          ...Markup.keyboard(keyRows).resize(),
-          ...inlineKeyboard
-        });
-        return;
-      } catch {}
-    }
-    await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard });
+    // Kirim reply keyboard dulu (angka muncul)
+await ctx.reply('🛍', Markup.keyboard(keyRows).resize());
+
+// Lalu kirim list produk dengan inline nav
+if (tenantData?.banner_file_id) {
+  try {
+    await ctx.replyWithPhoto(tenantData.banner_file_id, {
+      caption: text, parse_mode: 'Markdown', ...inlineKeyboard
+    });
+    return;
+  } catch {}
+}
+await ctx.reply(text, { parse_mode: 'Markdown', ...inlineKeyboard });
   } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
 }
 
