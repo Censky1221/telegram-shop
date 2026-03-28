@@ -718,16 +718,16 @@ module.exports = function registerHandlers(bot, tenant) {
     // Format teks seperti screenshot
     const lines = pageItems.map((p, i) => {
   const stock = parseInt(p.stock_count) || 0;
-  const check = stock > 0 ? '✅' : '❌';
+  const emoji = stock > 0 ? '✅' : '❌';
   const number = start + i + 1;
 
-  // Potong nama produk supaya tidak terlalu panjang di HP
+  // Potong nama produk agar tidak meluber di HP
   let name = p.name.trim();
-  if (name.length > 26) {
-    name = name.substring(0, 23) + '..';
+  if (name.length > 28) {
+    name = name.substring(0, 25) + '..';
   }
 
-  return `${check} [${number}] ${name} (${stock})`;
+  return `${emoji} [${number}] ${name} (${stock})`;
 }).join('\n');
 
 const text = `🛒 LIST PRODUK
@@ -735,7 +735,7 @@ Page ${safePage} / ${totalPages}
 
 ${lines}
 
-_Ketik nomor untuk melihat detail._`;
+Ketik nomor untuk melihat detail.`;
 
     if (messageId) {
       // Edit pesan lama (dari inline button)
