@@ -719,14 +719,14 @@ module.exports = function registerHandlers(bot, tenant) {
     const lines = pageItems.map((p, i) => {
       const stock = parseInt(p.stock_count);
       const emoji = stock > 0 ? '✅' : '❌';
-      return `${emoji} ${start + i + 1} ${p.name} [ ${stock} ]`;
+      return `${emoji} ${start + i + 1} ${p.name} [| ${stock} ]`;
     }).join('\n');
     const text =
   `╭ - - - - - - - - - - - - - - - - ╮\n` +
   `┊  LIST PRODUK\n` +
   `┊  page ${safePage} / ${totalPages}\n` +
   `┊ - - - - - - - - - - - - - - - -\n` +
-  `${lines}\n` +
+  `┊  ${lines}\n` +
   `╰ - - - - - - - - - - - - - - - - ╯\n\n` +
   `_Ketik nomor untuk melihat detail._`;
 
