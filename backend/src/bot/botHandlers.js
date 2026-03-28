@@ -719,21 +719,19 @@ module.exports = function registerHandlers(bot, tenant) {
     const lines = pageItems.map((p, i) => {
       const stock = parseInt(p.stock_count) || 0;
       const emoji = stock > 0 ? '✅' : '❌';
-  
-     // Membuat nomor rata kanan (supaya lebih rapi)
-      const number = String(start + i + 1).padStart(2, ' ');
-  
+      const number = String(start + i + 1).padStart(2, ' ');   // nomor rata kanan
+
       return `┊ ${emoji} ${number} ${p.name} [ ${stock} ]`;
     }).join('\n');
 
-    const text = `╭ ───────────────────────────── ╮
-  ┊         LIST PRODUK          
-  ┊ Page ${safePage} / ${totalPages}
-  ┊ ─────────────────────────────
-    ${lines}
-  ╰ ───────────────────────────── ╯
+const text = `╭ ───────────────────────────── ╮
+┊         LIST PRODUK          
+┊ Page ${safePage} / ${totalPages}
+┊ ─────────────────────────────
+${lines}
+╰ ───────────────────────────── ╯
 
-    _Ketik nomor untuk melihat detail._`;
+_Ketik nomor untuk melihat detail._`;
 
     if (messageId) {
       // Edit pesan lama (dari inline button)
