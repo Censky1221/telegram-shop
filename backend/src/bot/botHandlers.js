@@ -687,53 +687,71 @@ module.exports = function registerHandlers(bot, tenant) {
        WHERE p.is_active=true AND p.tenant_id=$1 GROUP BY p.id ORDER BY p.id`,
       [tenantId]
     );
-    if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.', Markup.keyboard([['🏠 Menu']]).resize());
+    if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.');
 
-    const PAGE = 9;
+    const PAGE       = 9;
     const totalPages = Math.ceil(allProducts.length / PAGE);
     const safePage   = Math.min(Math.max(page, 1), totalPages);
     const start      = (safePage - 1) * PAGE;
     const pageItems  = allProducts.slice(start, start + PAGE);
 
-    // Simpan semua produk di map (semua halaman)
+    // Simpan semua produk di map
     const key = `${tenantId}_${ctx.from.id}`;
     userProductMap[key] = { _page: safePage };
     allProducts.forEach((p, i) => { userProductMap[key][String(i + 1)] = p.id; });
 
-    // Reply keyboard — semua angka + menu
+    // Reply keyboard — semua angka
     const keyRows = [];
     const allNums = allProducts.map((_, i) => String(i + 1));
-    for (let i = 0; i < allNums.length; i += 5) keyRows.push(allNums.slice(i, i + 5).map(n => Markup.button.text(n)));
-    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
+    for (let i = 0; i < allNums.length; i += 6) {
+      keyRows.push(allNums.slice(i, i + 6).map(n => Markup.button.text(n)));
+    }
+    keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('💰 Saldo Saya')]);
     keyRows.push([Markup.button.text('🏠 Menu'), Markup.button.text('🔥 Populer')]);
 
-    // Inline keyboard — navigasi halaman (edit pesan)
-    const inlineNav = [];
-    if (safePage > 1)          inlineNav.push(Markup.button.callback('◀️ Sebelumnya', `page_${safePage - 1}`));
-    if (safePage < totalPages) inlineNav.push(Markup.button.callback('Selanjutnya ▶️', `page_${safePage + 1}`));
-    const inlineKeyboard = inlineNav.length > 0 ? Markup.inlineKeyboard([inlineNav]) : {};
+    // Inline — Selanjutnya/Sebelumnya
+    const navRow = [];
+    if (safePage > 1)          navRow.push(Markup.button.callback('← Sebelumnya', `page_${safePage - 1}`));
+    if (safePage < totalPages) navRow.push(Markup.button.callback('Selanjutnya →', `page_${safePage + 1}`));
+    const inlineKeyboard = navRow.length > 0 ? Markup.inlineKeyboard([navRow]) : {};
 
-    const divider = `┊ - - - - - - - - - - - - - - - -`;
-    const lines   = pageItems.map((p, i) => {
-      const stock = parseInt(p.stock_count);
-      return `┊ ${stock > 0 ? '✅' : '❌'} [${start + i + 1}] ${p.name} (${stock})`;
-    }).join('\n');
-    const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n${divider}\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
+    // Format teks seperti screenshot
+    const lines = pageItems.map((p, i) => `${start + i + 1}. ${p.name}`).join('\n');
+    const text  =
+      `📦 *Daftar Produk*\n\n${lines}\n\n` +
+      `📄 Halaman ${safePage}/${totalPages}\n` +
+      `💡 Masukkan nomor untuk lanjut.`;
 
-    // Kalau ada messageId → edit pesan lama (dari inline button)
-    // Kalau dari inline button → hapus pesan lama, kirim baru dengan keyboard lengkap
     if (messageId) {
-     await ctx.telegram.deleteMessage(ctx.chat.id, messageId).catch(() => {});
+      // Edit pesan lama (dari inline button)
+      try {
+        await ctx.telegram.editMessageCaption(ctx.chat.id, messageId, null, text, {
+          parse_mode: 'Markdown', ...inlineKeyboard
+        });
+        return;
+      } catch {
+        try {
+          await ctx.telegram.editMessageText(ctx.chat.id, messageId, null, text, {
+            parse_mode: 'Markdown', ...inlineKeyboard
+          });
+          return;
+        } catch (e) { console.error('edit error:', e.message); }
+      }
     }
 
     // Kirim pesan baru
     const { rows: [tenantData] } = await pool.query(`SELECT banner_file_id FROM tenants WHERE id=$1`, [tenantId]);
     if (tenantData?.banner_file_id) {
-      try { await ctx.replyWithPhoto(tenantData.banner_file_id, { caption: text, parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
-      catch { await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard }); }
-    } else {
-      await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard });
+      try {
+        await ctx.replyWithPhoto(tenantData.banner_file_id, {
+          caption: text, parse_mode: 'Markdown',
+          ...Markup.keyboard(keyRows).resize(),
+          ...inlineKeyboard
+        });
+        return;
+      } catch {}
     }
+    await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.keyboard(keyRows).resize(), ...inlineKeyboard });
   } catch (err) { console.error('showProductList error:', err); ctx.reply('Gagal memuat produk.'); }
 }
 
