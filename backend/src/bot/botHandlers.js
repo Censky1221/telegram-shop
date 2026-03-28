@@ -3,7 +3,7 @@ const axios      = require('axios');
 const { pool }   = require('../db/pool');
 const QRCode     = require('qrcode');
 
-const PAGE_SIZE      = 9;
+const PAGE_SIZE      = 99;
 const userProductMap = {};
 const userCart       = {};
 const userVoucherMap = {}; // menyimpan voucher yang sedang diinput
@@ -691,7 +691,8 @@ module.exports = function registerHandlers(bot, tenant) {
       pageItems.forEach((p, i) => { userProductMap[key][String(start + i + 1)] = p.id; });
       const keyRows = [];
       const numKeys = pageItems.map((_, i) => String(start + i + 1));
-      for (let i = 0; i < numKeys.length; i += 6) keyRows.push(numKeys.slice(i, i + 6).map(n => Markup.button.text(n)));
+      for (let i = 0; i < numKeys.length; i += 5) keyRows.push(numKeys.slice(i, i + 5).map(n => Markup.button.text(n)));
+// Tambah sisa angka halaman berikutnya juga
       // Tombol Daftar Produk & Voucher di atas angka
     keyRows.unshift([Markup.button.text('🛍 Daftar Produk'), Markup.button.text('🎟️ Voucher')]);
 
