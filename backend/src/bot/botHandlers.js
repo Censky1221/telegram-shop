@@ -727,7 +727,7 @@ module.exports = function registerHandlers(bot, tenant) {
     name = name.substring(0, 23) + '..';
   }
 
-  return `${check} ${number} ${name} (${stock})`;
+  return `${check} [${number}] ${name} (${stock})`;
 }).join('\n');
 
 const text = `🛒 LIST PRODUK
