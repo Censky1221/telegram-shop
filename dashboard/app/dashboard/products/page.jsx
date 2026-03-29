@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL;
 
 function authHeaders() {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -16,11 +17,22 @@ export default function ProductsPage() {
   const [editing, setEditing]    = useState(null);
   const [loading, setLoading]    = useState(false);
 
-  useEffect(() => { fetchProducts(); }, []);
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) { window.location.href = '/login'; return; }
+    fetchProducts();
+  }, []);
 
   async function fetchProducts() {
-    const res = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
-    setProducts(await res.json());
+    try {
+      const res = await fetch(`${API}/api/admin/products`, { headers: authHeaders() });
+      if (res.status === 401) { localStorage.removeItem('token'); window.location.href = '/login'; return; }
+      const data = await res.json();
+      setProducts(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('fetchProducts error:', err);
+      setProducts([]);
+    }
   }
 
   async function handleSave() {
