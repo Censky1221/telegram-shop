@@ -2,10 +2,13 @@
 import { useState, useEffect } from 'react';
 
 const API = process.env.NEXT_PUBLIC_API_URL;
+
 function authHeaders() {
+  // Guard: localStorage hanya tersedia di browser (bukan SSR)
+  const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
   return {
     'Content-Type': 'application/json',
-    Authorization: `Bearer ${localStorage.getItem('token')}`,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -32,7 +35,11 @@ export default function OrdersPage() {
     try {
       const qs  = filter ? `?status=${filter}` : '';
       const res = await fetch(`${API}/api/admin/orders${qs}`, { headers: authHeaders() });
-      setOrders(await res.json());
+      const data = await res.json();
+      setOrders(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error('fetchOrders error:', err);
+      setOrders([]);
     } finally { setLoading(false); }
   }
 
@@ -52,6 +59,9 @@ export default function OrdersPage() {
         setOrders([data]);
         setDetail(data);
       }
+    } catch (err) {
+      console.error('handleSearch error:', err);
+      setOrders([]);
     } finally { setLoading(false); }
   }
 
