@@ -87,10 +87,20 @@ export default function SettingsPage() {
           <li>Lihat pesan dari bot, cari teks <strong>ID:</strong></li>
           <li>Copy angka ID tersebut dan paste di bawah</li>
         </ol>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Telegram ID Admin</label>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800 mb-4">
+          <p className="font-medium mb-2">📢 Mau kirim notif ke Channel Telegram?</p>
+          <ol className="space-y-1 list-decimal list-inside text-blue-700">
+            <li>Buat channel Telegram & tambahkan bot kamu sebagai <strong>Admin</strong></li>
+            <li>Untuk channel <strong>public</strong>: isi dengan <code className="bg-blue-100 px-1 rounded">@namachannel</code></li>
+            <li>Untuk channel <strong>private</strong>: forward pesan dari channel ke <code className="bg-blue-100 px-1 rounded">@userinfobot</code></li>
+            <li>Bot akan balas dengan ID seperti <code className="bg-blue-100 px-1 rounded">-100xxxxxxxxxx</code></li>
+            <li>Copy ID tersebut dan paste di field bawah</li>
+        </ol>
+        </div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Telegram ID Admin / Username channel</label>
         <input
           className="w-full border rounded-lg px-3 py-2.5 text-sm font-mono"
-          placeholder="123456789"
+          placeholder="123456789 atau @namachannel"
           value={adminTelegramId}
           onChange={e => setAdminTelegramId(e.target.value)}
         />
