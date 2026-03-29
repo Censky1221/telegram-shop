@@ -655,9 +655,9 @@ module.exports = function registerHandlers(bot, tenant) {
       const lines = pageItems.map((p, i) => {
         const stock = parseInt(p.stock_count) || 0;
         const emoji = stock > 0 ? '✅' : '❌';
-        return `${emoji} ${start + i + 1} ${p.name} [ ${stock} ]`;
+        return `${emoji} [${start + i + 1}] ${p.name} (${stock})`;
       }).join('\n');
-      const text = `╭ - - - - - - - - - - - - - - - - ╮\n┊  LIST PRODUK\n┊  page ${safePage} / ${totalPages}\n┊ - - - - - - - - - - - - - - - -\n${lines}\n╰ - - - - - - - - - - - - - - - - ╯\n\n_Ketik nomor untuk melihat detail._`;
+      const text = `🛒 *LIST PRODUK*\nPage ${safePage} / ${totalPages}\n\n${lines}\n\n_Ketik nomor untuk melihat detail._`;
 
       if (messageId) {
         try {
