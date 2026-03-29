@@ -25,20 +25,35 @@ export default function OrdersPage() {
   const [search, setSearch]   = useState('');
   const [loading, setLoading] = useState(true);
   const [detail, setDetail]   = useState(null);
+  const [error, setError]     = useState(null);
 
-  useEffect(() => { fetchOrders(); }, [filter]);
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = '/login';
+      return;
+    }
+    fetchOrders();
+  }, [filter]);
 
   async function fetchOrders() {
     setLoading(true);
     setSearch('');
     setDetail(null);
+    setError(null);
     try {
       const qs  = filter ? `?status=${filter}` : '';
       const res = await fetch(`${API}/api/admin/orders${qs}`, { headers: authHeaders() });
+      if (res.status === 401) {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+        return;
+      }
       const data = await res.json();
       setOrders(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('fetchOrders error:', err);
+      setError('Gagal memuat orders. Periksa koneksi internet.');
       setOrders([]);
     } finally { setLoading(false); }
   }
@@ -150,6 +165,8 @@ export default function OrdersPage() {
       <div className="bg-white rounded-2xl shadow overflow-hidden">
         {loading ? (
           <div className="py-16 text-center text-gray-400">Loading...</div>
+        ) : error ? (
+          <div className="py-16 text-center text-red-400">{error}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600 text-left">
