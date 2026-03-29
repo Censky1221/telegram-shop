@@ -1,13 +1,27 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError]       = useState('');
-  const [loading, setLoading]   = useState(false);
+  const [email,      setEmail]      = useState('');
+  const [password,   setPassword]   = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [error,      setError]      = useState('');
+  const [loading,    setLoading]    = useState(false);
+
+  // Auto-login jika token masih ada
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) router.push('/dashboard/products');
+
+    // Isi email tersimpan jika ada
+    const savedEmail = localStorage.getItem('saved_email');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -24,7 +38,16 @@ export default function LoginPage() {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login gagal');
+
       localStorage.setItem('token', data.token);
+
+      // Simpan atau hapus email berdasarkan remember me
+      if (rememberMe) {
+        localStorage.setItem('saved_email', email);
+      } else {
+        localStorage.removeItem('saved_email');
+      }
+
       router.push('/dashboard/products');
     } catch (err) {
       setError(err.message);
@@ -68,6 +91,21 @@ export default function LoginPage() {
               placeholder="••••••••"
             />
           </div>
+
+          {/* Remember Me */}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="rememberMe"
+              checked={rememberMe}
+              onChange={e => setRememberMe(e.target.checked)}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+            />
+            <label htmlFor="rememberMe" className="text-sm text-gray-600 cursor-pointer select-none">
+              Remember me
+            </label>
+          </div>
+
           <button
             type="submit"
             disabled={loading}
