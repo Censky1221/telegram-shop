@@ -361,16 +361,17 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
 // ── Settings ──────────────────────────────────────────────────────
 router.get('/settings', authMiddleware, async (req, res) => {
   const { rows: [tenant] } = await pool.query(
-    `SELECT banner_file_id, terms, help_text FROM tenants WHERE id=$1`, [req.admin.tenant_id]
+    `SELECT banner_file_id, terms, help_text, admin_telegram_id FROM tenants WHERE id=$1`,
+    [req.admin.tenant_id]
   );
   res.json(tenant || {});
 });
 
 router.put('/settings', authMiddleware, async (req, res) => {
-  const { banner_file_id, terms, help_text } = req.body;
+  const { banner_file_id, terms, help_text, admin_telegram_id } = req.body;
   await pool.query(
-    `UPDATE tenants SET banner_file_id=$1, terms=$2, help_text=$3 WHERE id=$4`,
-    [banner_file_id || null, terms || null, help_text || null, req.admin.tenant_id]
+    `UPDATE tenants SET banner_file_id=$1, terms=$2, help_text=$3, admin_telegram_id=$4 WHERE id=$5`,
+    [banner_file_id || null, terms || null, help_text || null, admin_telegram_id || null, req.admin.tenant_id]
   );
   res.json({ success: true });
 });

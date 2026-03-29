@@ -11,10 +11,11 @@ function authHeaders() {
 }
 
 export default function SettingsPage() {
-  const [bannerFileId, setBannerFileId] = useState('');
-  const [helpText, setHelpText]         = useState('');
-  const [saving, setSaving]             = useState(false);
-  const [saved, setSaved]               = useState(false);
+  const [bannerFileId,     setBannerFileId]     = useState('');
+  const [helpText,         setHelpText]         = useState('');
+  const [adminTelegramId,  setAdminTelegramId]  = useState('');
+  const [saving,           setSaving]           = useState(false);
+  const [saved,            setSaved]            = useState(false);
 
   useEffect(() => { fetchSettings(); }, []);
 
@@ -23,6 +24,7 @@ export default function SettingsPage() {
     const data = await res.json();
     setBannerFileId(data.banner_file_id || '');
     setHelpText(data.help_text || '');
+    setAdminTelegramId(data.admin_telegram_id || '');
   }
 
   async function handleSave() {
@@ -32,7 +34,11 @@ export default function SettingsPage() {
       await fetch(`${API}/api/admin/settings`, {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ banner_file_id: bannerFileId, help_text: helpText }),
+        body: JSON.stringify({
+          banner_file_id   : bannerFileId,
+          help_text        : helpText,
+          admin_telegram_id: adminTelegramId,
+        }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
@@ -47,9 +53,7 @@ export default function SettingsPage() {
       {/* Banner */}
       <div className="bg-white rounded-2xl shadow p-6 mb-4">
         <h2 className="font-medium mb-1">🖼️ Banner Daftar Produk</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Gambar ini muncul saat user membuka daftar produk di bot.
-        </p>
+        <p className="text-sm text-gray-500 mb-4">Gambar ini muncul saat user membuka daftar produk di bot.</p>
         <ol className="text-sm text-gray-600 mb-4 space-y-1 list-decimal list-inside bg-gray-50 rounded-lg p-4">
           <li>Kirim gambar banner ke bot kamu di Telegram</li>
           <li>Reply gambar itu lalu ketik <code className="bg-gray-200 px-1 rounded">/fileid</code></li>
@@ -67,6 +71,32 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 text-sm text-blue-700 mb-2">
             <span>✅ Banner aktif</span>
             <button onClick={() => setBannerFileId('')} className="text-red-500 hover:underline text-xs">Hapus</button>
+          </div>
+        )}
+      </div>
+
+      {/* Notif Admin */}
+      <div className="bg-white rounded-2xl shadow p-6 mb-4">
+        <h2 className="font-medium mb-1">🔔 Notifikasi Order ke Admin</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Admin akan mendapat notif Telegram setiap ada order baru masuk atau terbayar.
+        </p>
+        <ol className="text-sm text-gray-600 mb-4 space-y-1 list-decimal list-inside bg-gray-50 rounded-lg p-4">
+          <li>Buka bot kamu di Telegram</li>
+          <li>Ketik <code className="bg-gray-200 px-1 rounded">/start</code></li>
+          <li>Lihat pesan dari bot, cari teks <strong>ID:</strong></li>
+          <li>Copy angka ID tersebut dan paste di bawah</li>
+        </ol>
+        <label className="block text-sm font-medium text-gray-700 mb-1">Telegram ID Admin</label>
+        <input
+          className="w-full border rounded-lg px-3 py-2.5 text-sm font-mono"
+          placeholder="123456789"
+          value={adminTelegramId}
+          onChange={e => setAdminTelegramId(e.target.value)}
+        />
+        {adminTelegramId && (
+          <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
+            ✅ Notif aktif ke ID: <strong>{adminTelegramId}</strong>
           </div>
         )}
       </div>

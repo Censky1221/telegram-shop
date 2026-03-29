@@ -65,6 +65,37 @@ setInterval(async () => {
   }
 }, 60 * 1000); // cek setiap 1 menit
 
+// ── Fungsi notif order masuk ke admin ────────────────────
+const notifyAdminNewOrder = async (tenantId, order, productName, variantName, username, qty, total) => {
+  try {
+    const { getBotByTenantId } = require('./bot/tenantManager');
+    const bot = getBotByTenantId(tenantId);
+    if (!bot) return;
+
+    const { rows: [tenant] } = await pool.query(
+      `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
+    );
+    if (!tenant?.admin_telegram_id) return;
+
+    const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
+    const userLabel = username ? `@${username}` : `#${order.user_id}`;
+
+    await bot.telegram.sendMessage(
+      tenant.admin_telegram_id,
+      `🛒 *Order Baru Masuk!*\n\n` +
+      `🧾 ID: *#${order.id}*\n` +
+      `📦 Produk: *${prodLabel}*\n` +
+      `👤 User: ${userLabel}\n` +
+      `🛍 Qty: *${qty}*\n` +
+      `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
+      `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) { console.warn('notif admin error:', err.message); }
+};
+
+module.exports.notifyAdminNewOrder = notifyAdminNewOrder;
+
 // ── Start ───────────────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`API running on http://localhost:${PORT}`);
