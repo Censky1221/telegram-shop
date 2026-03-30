@@ -715,7 +715,7 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
   }
 });
 
-// ── Refresh List Varian ─────────────────
+// ── Refresh List Varian (halaman pilih varian) ─────────────────
 bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
     await ctx.answerCbQuery('🔄 Memperbarui...');
@@ -726,7 +726,8 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
     const { rows: [product] } = await pool.query(
       `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
-       FROM products p LEFT JOIN stocks s ON s.product_id = p.id
+       FROM products p 
+       LEFT JOIN stocks s ON s.product_id = p.id
        WHERE p.id = $1 AND p.tenant_id = $2 AND p.is_active = true
        GROUP BY p.id`,
       [productId, tenantId]
@@ -734,9 +735,13 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
 
     const { rows: variants } = await pool.query(
       `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-       FROM product_variants pv LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pv.product_id = $1 AND pv.tenant_id = $2 AND pv.is_active = true
-       GROUP BY pv.id ORDER BY pv.id`,
+       FROM product_variants pv 
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.product_id = $1 
+         AND pv.tenant_id = $2 
+         AND pv.is_active = true
+       GROUP BY pv.id 
+       ORDER BY pv.id`,
       [productId, tenantId]
     );
 
@@ -746,10 +751,14 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
 
     const sold = parseInt(product.sold_count || 0);
     const now = new Date().toLocaleTimeString('id-ID', { 
-      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta' 
     });
 
-    let text = `🏷 *${product.name}*\n`;
+    // Format yang kamu inginkan
+    let text = `🏷 *${product.name}*\n\n`;
     text += `${sold} Terjual\n`;
 
     if (product.description && product.description.trim() !== '') {
@@ -762,7 +771,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       const stock = parseInt(v.stock_count || 0);
       const harga = Number(v.price).toLocaleString('id-ID');
       const stokText = stock > 0 ? ` (Stok ${stock})` : ' - Habis ❌';
-      text += `**${v.name}** - Rp ${harga}${stokText}\n`;
+      text += `${v.name} - Rp ${harga}${stokText}\n`;
     });
 
     text += `\n⟲ Diperbarui pada ${now} WIB`;
