@@ -724,17 +724,23 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   const productId = parseInt(ctx.match[1]);
 
   try {
-    // Query data terbaru
+    // Ambil data produk + sold count
     const { rows: [product] } = await pool.query(
-      `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
-       FROM products p
-       WHERE p.id = $1 AND p.tenant_id = $2 AND p.is_active = true
+      `SELECT p.*, 
+              COUNT(s.id) FILTER (WHERE s.status = 'sold') AS sold_count
+       FROM products p 
+       LEFT JOIN stocks s ON s.product_id = p.id
+       WHERE p.id = $1 
+         AND p.tenant_id = $2 
+         AND p.is_active = true 
        GROUP BY p.id`,
       [productId, tenantId]
     );
 
+    // Ambil semua varian + stok tersedia
     const { rows: variants } = await pool.query(
-      `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+      `SELECT pv.*, 
+              COUNT(s.id) FILTER (WHERE s.status = 'available') AS stock_count
        FROM product_variants pv
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.product_id = $1 
@@ -770,7 +776,6 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     variantButtons.push([Markup.button.callback('🔄 Refresh', `refresh_product_variants_${productId}`)]);
     variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
 
-    // Edit pesan dengan data & keyboard baru
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard(variantButtons)
