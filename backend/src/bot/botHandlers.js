@@ -615,9 +615,11 @@ module.exports = function registerHandlers(bot, tenant) {
   const orderId  = parseInt(ctx.match[1]);
   const userTgId = ctx.match[2];
   try {
-    await pool.query(`UPDATE service_requests SET status='done', done_at=NOW() WHERE order_id=$1`, [orderId]);
-    
-    // Ambil produk info
+    await pool.query(
+      `UPDATE service_requests SET status='done', done_at=NOW() WHERE order_id=$1`,
+      [orderId]
+    );
+
     const { rows: [orderInfo] } = await pool.query(
       `SELECT p.name AS product_name, pv.name AS variant_name
        FROM orders o JOIN products p ON p.id=o.product_id
@@ -628,13 +630,6 @@ module.exports = function registerHandlers(bot, tenant) {
       ? `${orderInfo.product_name} - ${orderInfo.variant_name}`
       : orderInfo?.product_name || '-';
 
-    // Ambil pesan custom dari tenant
-    const { rows: [t] } = await pool.query(
-      `SELECT service_done_message FROM tenants WHERE id=$1`, [tenantId]
-    );
-    const customMsg = t?.service_done_message ||
-      `Pesanan kamu sudah selesai diproses oleh admin.\nSilakan cek email kamu dan hubungi admin jika ada masalah. 🙏`;
-
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
     await ctx.reply(`✅ Order #${orderId} ditandai selesai.`);
     await ctx.telegram.sendMessage(
@@ -642,10 +637,17 @@ module.exports = function registerHandlers(bot, tenant) {
       `🎉 *Jasa Selesai Diproses!*\n\n` +
       `🧾 ID Pesanan: *#${orderId}*\n` +
       `📦 Produk: *${prodLabel}*\n\n` +
-      `${customMsg}`,
-      { parse_mode: 'Markdown' }
+      `Pesanan kamu sudah selesai diproses oleh admin.\n` +
+      `Silakan cek email kamu dan hubungi admin jika ada masalah. 🙏`,
+      {
+        parse_mode: 'Markdown',
+        ...MAIN_KEYBOARD,   // <-- ini yang tambah keyboard menu
+      }
     );
-  } catch (err) { console.error('service_done error:', err); }
+  } catch (err) {
+    console.error('service_done error:', err);
+    await ctx.reply(`❌ Gagal: ${err.message}`);
+  }
 });
 
   // ── Cancel ────────────────────────────────────────────────
