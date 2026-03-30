@@ -811,7 +811,7 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
 
     [Markup.button.callback('🎟️ Pakai Voucher', `voucher_v_${variantId}`)],
 
-    // ── Tambahan Tombol Refresh ──
+    // Tombol Refresh
     [Markup.button.callback('🔄 Refresh', `refresh_variant_${variantId}`)],
 
     // Tombol Kembali (paling bawah)
