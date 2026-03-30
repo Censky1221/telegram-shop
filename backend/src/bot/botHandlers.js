@@ -715,6 +715,73 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
   }
 });
 
+// ── Refresh List Varian (Halaman Pilih Varian) ─────────────────
+bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
+  try {
+    await ctx.answerCbQuery('🔄 Memperbarui daftar varian...');
+  } catch (e) {}
+
+  const productId = parseInt(ctx.match[1]);
+
+  try {
+    // Ambil data produk + varian terbaru
+    const { rows: [product] } = await pool.query(
+      `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+       FROM products p
+       WHERE p.id = $1 AND p.tenant_id = $2 AND p.is_active = true
+       GROUP BY p.id`,
+      [productId, tenantId]
+    );
+
+    const { rows: variants } = await pool.query(
+      `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+       FROM product_variants pv
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.product_id = $1 
+         AND pv.tenant_id = $2 
+         AND pv.is_active = true
+       GROUP BY pv.id 
+       ORDER BY pv.id`,
+      [productId, tenantId]
+    );
+
+    if (!product || variants.length === 0) {
+      return ctx.answerCbQuery('❌ Data tidak ditemukan', { show_alert: true });
+    }
+
+    const sold = parseInt(product.sold_count || 0);
+    const now = new Date().toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta' 
+    });
+
+    const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nPilih varian:\n⟲ Diperbarui pada ${now} WIB`;
+
+    const variantButtons = variants.map(v => {
+      const stock = parseInt(v.stock_count || 0);
+      const label = stock > 0 
+        ? `${v.name} - Rp ${Number(v.price).toLocaleString('id-ID')} (${stock})` 
+        : `${v.name} - Habis ❌`;
+      return [Markup.button.callback(label, `variant_${v.id}`)];
+    });
+
+    variantButtons.push([Markup.button.callback('🔄 Refresh', `refresh_product_variants_${productId}`)]);
+    variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard(variantButtons)
+    });
+
+    await ctx.answerCbQuery('✅ Daftar varian diperbarui');
+  } catch (err) {
+    console.error('refresh_product_variants error:', err.message);
+    await ctx.answerCbQuery('❌ Gagal memperbarui daftar varian', { show_alert: true });
+  }
+});
+
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
