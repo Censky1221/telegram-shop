@@ -11,12 +11,11 @@ function authHeaders() {
 }
 
 export default function SettingsPage() {
-  const [bannerFileId,        setBannerFileId]        = useState('');
-  const [helpText,            setHelpText]            = useState('');
-  const [adminTelegramId,     setAdminTelegramId]     = useState('');
-  const [serviceDoneMessage,  setServiceDoneMessage]  = useState('');
-  const [saving,              setSaving]              = useState(false);
-  const [saved,               setSaved]               = useState(false);
+  const [bannerFileId,     setBannerFileId]     = useState('');
+  const [helpText,         setHelpText]         = useState('');
+  const [adminTelegramId,  setAdminTelegramId]  = useState('');
+  const [saving,           setSaving]           = useState(false);
+  const [saved,            setSaved]            = useState(false);
 
   useEffect(() => { fetchSettings(); }, []);
 
@@ -26,7 +25,6 @@ export default function SettingsPage() {
     setBannerFileId(data.banner_file_id || '');
     setHelpText(data.help_text || '');
     setAdminTelegramId(data.admin_telegram_id || '');
-    setServiceDoneMessage(data.service_done_message || '');
   }
 
   async function handleSave() {
@@ -37,19 +35,15 @@ export default function SettingsPage() {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify({
-          banner_file_id       : bannerFileId,
-          help_text            : helpText,
-          admin_telegram_id    : adminTelegramId,
-          service_done_message : serviceDoneMessage,
+          banner_file_id   : bannerFileId,
+          help_text        : helpText,
+          admin_telegram_id: adminTelegramId,
         }),
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } finally { setSaving(false); }
   }
-
-  const defaultServiceDone =
-    `Pesanan kamu sudah selesai diproses oleh admin.\nSilakan cek email kamu dan hubungi admin jika ada masalah. 🙏`;
 
   return (
     <div>
@@ -114,42 +108,6 @@ export default function SettingsPage() {
           <div className="mt-2 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-sm text-green-700">
             ✅ Notif aktif ke ID: <strong>{adminTelegramId}</strong>
           </div>
-        )}
-      </div>
-
-      {/* Pesan Jasa Selesai */}
-      <div className="bg-white rounded-2xl shadow p-6 mb-4">
-        <h2 className="font-medium mb-1">🎉 Pesan Jasa Selesai</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Pesan ini dikirim ke pembeli saat admin klik <strong>"Tandai Selesai"</strong> pada order jasa.
-        </p>
-
-        {/* Preview */}
-        <div className="bg-gray-900 rounded-xl p-4 mb-4 text-sm">
-          <p className="text-gray-400 text-xs mb-2">Preview pesan ke buyer:</p>
-          <div className="text-white space-y-1 whitespace-pre-wrap font-mono text-xs leading-relaxed">
-            {`🎉 *Jasa Selesai Diproses!*\n\n🧾 ID Pesanan: *#233*\n📦 Produk: *YOUTUBE PREMIUM - FAMPLAN 1B*\n\n${serviceDoneMessage || defaultServiceDone}`}
-          </div>
-        </div>
-
-        <label className="block text-sm font-medium text-gray-700 mb-1">Isi pesan kustom</label>
-        <textarea
-          className="w-full border rounded-lg px-3 py-2.5 text-sm"
-          rows={5}
-          placeholder={defaultServiceDone}
-          value={serviceDoneMessage}
-          onChange={e => setServiceDoneMessage(e.target.value)}
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Mendukung format Markdown: *bold*, _italic_, `code`. Kosongkan untuk pakai pesan default.
-        </p>
-        {serviceDoneMessage && (
-          <button
-            onClick={() => setServiceDoneMessage('')}
-            className="mt-2 text-xs text-red-500 hover:underline"
-          >
-            Reset ke pesan default
-          </button>
         )}
       </div>
 
