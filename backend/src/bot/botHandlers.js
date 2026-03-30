@@ -414,7 +414,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const { assignStockAndDeliver } = require('../services/stockService');
       const result = await assignStockAndDeliver(order, tenantId);
       if (result?.waiting_email) {
-        userServiceMap[`${tenantId}_${user.id}`] = order.id;
+        userServiceMap[`${tenantId}_${ctx.from.id}`] = order.id;
       }
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_v error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
@@ -468,7 +468,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const { assignStockAndDeliver } = require('../services/stockService');
       const result = await assignStockAndDeliver(order, tenantId);
       if (result?.waiting_email) {
-        userServiceMap[`${tenantId}_${user.id}`] = order.id;
+        userServiceMap[`${tenantId}_${ctx.from.id}`] = order.id;
       }
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_p error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
@@ -604,7 +604,7 @@ module.exports = function registerHandlers(bot, tenant) {
       const { assignStockAndDeliver } = require('../services/stockService');
       const result = await assignStockAndDeliver(order, tenantId);
       if (result?.waiting_email) {
-        userServiceMap[`${tenantId}_${order.user_db_id}`] = order.id;
+        userServiceMap[`${tenantId}_${order.telegram_id}`] = order.id;
       }
     } catch (err) { console.error('check_pakasir error:', err); ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true }); }
   });
