@@ -636,10 +636,16 @@ bot.action(/^refresh_product_(\d+)$/, async (ctx) => {
     const stock   = parseInt(product.stock_count || 0);
     const sold    = parseInt(product.sold_count || 0);
     const inStock = stock > 0;
-
     const currentQty = userCart[cartKey]?.qty || 1;
 
-    const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
+    const now = new Date().toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta' 
+    });
+
+    const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*\n⟲ Diperbarui pada ${now} WIB`;
 
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
@@ -654,7 +660,7 @@ bot.action(/^refresh_product_(\d+)$/, async (ctx) => {
 });
 
 
-// ── Refresh Varian ─────────────────────────────────────────
+// ── Refresh Varian (Detail Varian) ─────────────────────────────
 bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
   try {
     await ctx.answerCbQuery('🔄 Memperbarui stok...');
@@ -685,11 +691,16 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
     const stock   = parseInt(variant.stock_count || 0);
     const sold    = parseInt(variant.sold_count || 0);
     const inStock = stock > 0;
-
-    // Ambil qty saat ini dari cart (supaya tidak reset ke 1)
     const currentQty = userCart[cartKey]?.qty || 1;
 
-    const text = `🏷 *${variant.product_name} - ${variant.name}*\n\n📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
+    const now = new Date().toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta' 
+    });
+
+    const text = `🏷 *${variant.product_name} - ${variant.name}*\n\n📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*\n⟲ Diperbarui pada ${now} WIB`;
 
     // Update pesan + keyboard dengan data terbaru
     await ctx.editMessageText(text, {
@@ -782,41 +793,75 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
   }
 
   async function showProductDetail(ctx, productId) {
-    try {
-      const { rows: [product] } = await pool.query(
-        `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
-                COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
-         FROM products p LEFT JOIN stocks s ON s.product_id=p.id
-         WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true GROUP BY p.id`,
-        [productId, tenantId]
-      );
-      if (!product) return ctx.reply('Produk tidak ditemukan.');
-      const { rows: variants } = await pool.query(
-        `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM product_variants pv LEFT JOIN stocks s ON s.variant_id=pv.id
-         WHERE pv.product_id=$1 AND pv.tenant_id=$2 AND pv.is_active=true GROUP BY pv.id ORDER BY pv.id`,
-        [productId, tenantId]
-      );
-      if (variants.length > 0) {
-        const sold = parseInt(product.sold_count || 0);
-        const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nPilih varian:`;
-        const variantButtons = variants.map(v => {
-          const stock = parseInt(v.stock_count || 0);
-          const label = stock > 0 ? `${v.name} - Rp ${Number(v.price).toLocaleString('id-ID')} (${stock})` : `${v.name} - Habis ❌`;
-          return [Markup.button.callback(label, `variant_${v.id}`)];
-        });
-        variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
-        await ctx.reply(text, { parse_mode: 'Markdown', ...Markup.inlineKeyboard(variantButtons) });
-      } else {
-        const stock   = parseInt(product.stock_count || 0);
-        const sold    = parseInt(product.sold_count || 0);
-        const inStock = stock > 0;
-        userCart[`${tenantId}_${ctx.from.id}`] = { productId, qty: 1, type: 'product' };
-        const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
-        await ctx.reply(text, { parse_mode: 'Markdown', ...buildProductKeyboard(productId, 1, inStock) });
-      }
-    } catch (err) { console.error('showProductDetail error:', err); ctx.reply('Gagal memuat detail produk.'); }
+  try {
+    const { rows: [product] } = await pool.query(
+      `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
+              COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+       FROM products p LEFT JOIN stocks s ON s.product_id=p.id
+       WHERE p.id=$1 AND p.tenant_id=$2 AND p.is_active=true GROUP BY p.id`,
+      [productId, tenantId]
+    );
+
+    if (!product) return ctx.reply('Produk tidak ditemukan.');
+
+    const { rows: variants } = await pool.query(
+      `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+       FROM product_variants pv LEFT JOIN stocks s ON s.variant_id=pv.id
+       WHERE pv.product_id=$1 AND pv.tenant_id=$2 AND pv.is_active=true GROUP BY pv.id ORDER BY pv.id`,
+      [productId, tenantId]
+    );
+
+    // Helper waktu WIB
+    const now = new Date().toLocaleTimeString('id-ID', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta' 
+    });
+
+    if (variants.length > 0) {
+      // === HALAMAN LIST VARIAN ===
+      const sold = parseInt(product.sold_count || 0);
+      
+      const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nPilih varian:\n⟲ Diperbarui pada ${now} WIB`;
+
+      const variantButtons = variants.map(v => {
+        const stock = parseInt(v.stock_count || 0);
+        const label = stock > 0 
+          ? `${v.name} - Rp ${Number(v.price).toLocaleString('id-ID')} (${stock})` 
+          : `${v.name} - Habis ❌`;
+        return [Markup.button.callback(label, `variant_${v.id}`)];
+      });
+
+      // Tambahkan tombol Refresh dan Kembali
+      variantButtons.push([Markup.button.callback('🔄 Refresh', `refresh_product_variants_${product.id}`)]);
+      variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
+
+      await ctx.reply(text, { 
+        parse_mode: 'Markdown', 
+        ...Markup.inlineKeyboard(variantButtons) 
+      });
+
+    } else {
+      // === HALAMAN DETAIL PRODUK (tanpa varian) ===
+      const stock   = parseInt(product.stock_count || 0);
+      const sold    = parseInt(product.sold_count || 0);
+      const inStock = stock > 0;
+
+      userCart[`${tenantId}_${ctx.from.id}`] = { productId, qty: 1, type: 'product' };
+
+      const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(product.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*\n⟲ Diperbarui pada ${now} WIB`;
+
+      await ctx.reply(text, { 
+        parse_mode: 'Markdown', 
+        ...buildProductKeyboard(productId, 1, inStock) 
+      });
+    }
+  } catch (err) { 
+    console.error('showProductDetail error:', err); 
+    ctx.reply('Gagal memuat detail produk.'); 
   }
+}
 
   async function showVariantDetail(ctx, variantId, qty = 1) {
     try {
