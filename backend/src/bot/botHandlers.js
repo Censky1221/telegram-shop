@@ -611,23 +611,42 @@ module.exports = function registerHandlers(bot, tenant) {
 
   // ── Tandai jasa selesai (admin klik tombol di notif) ──────
   bot.action(/^service_done_(\d+)_(\d+)$/, async (ctx) => {
-    try { await ctx.answerCbQuery('Menandai selesai...'); } catch {}
-    const orderId  = parseInt(ctx.match[1]);
-    const userTgId = ctx.match[2];
-    try {
-      await pool.query(`UPDATE service_requests SET status='done', done_at=NOW() WHERE order_id=$1`, [orderId]);
-      await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
-      await ctx.reply(`✅ Order #${orderId} ditandai selesai.`);
-      await ctx.telegram.sendMessage(
-        userTgId,
-        `🎉 *Jasa Selesai Diproses!*\n\n` +
-        `🧾 ID Pesanan: *#${orderId}*\n\n` +
-        `Pesanan kamu sudah selesai diproses oleh admin.\n` +
-        `Silakan cek email kamu dan hubungi admin jika ada masalah. 🙏`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (err) { console.error('service_done error:', err); }
-  });
+  try { await ctx.answerCbQuery('Menandai selesai...'); } catch {}
+  const orderId  = parseInt(ctx.match[1]);
+  const userTgId = ctx.match[2];
+  try {
+    await pool.query(`UPDATE service_requests SET status='done', done_at=NOW() WHERE order_id=$1`, [orderId]);
+    
+    // Ambil produk info
+    const { rows: [orderInfo] } = await pool.query(
+      `SELECT p.name AS product_name, pv.name AS variant_name
+       FROM orders o JOIN products p ON p.id=o.product_id
+       LEFT JOIN product_variants pv ON pv.id=o.variant_id
+       WHERE o.id=$1`, [orderId]
+    );
+    const prodLabel = orderInfo?.variant_name
+      ? `${orderInfo.product_name} - ${orderInfo.variant_name}`
+      : orderInfo?.product_name || '-';
+
+    // Ambil pesan custom dari tenant
+    const { rows: [t] } = await pool.query(
+      `SELECT service_done_message FROM tenants WHERE id=$1`, [tenantId]
+    );
+    const customMsg = t?.service_done_message ||
+      `Pesanan kamu sudah selesai diproses oleh admin.\nSilakan cek email kamu dan hubungi admin jika ada masalah. 🙏`;
+
+    await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {});
+    await ctx.reply(`✅ Order #${orderId} ditandai selesai.`);
+    await ctx.telegram.sendMessage(
+      userTgId,
+      `🎉 *Jasa Selesai Diproses!*\n\n` +
+      `🧾 ID Pesanan: *#${orderId}*\n` +
+      `📦 Produk: *${prodLabel}*\n\n` +
+      `${customMsg}`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) { console.error('service_done error:', err); }
+});
 
   // ── Cancel ────────────────────────────────────────────────
   bot.action('cancel_buy', async (ctx) => {
