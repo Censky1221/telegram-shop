@@ -901,13 +901,14 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       let text = `🏷 *${product.name}*\n`;
       text += `${sold} Terjual\n`;
 
+      // Deskripsi hanya ditampilkan jika ada isinya
       if (product.description && product.description.trim() !== '') {
         text += `${product.description}\n\n`;
       } else {
         text += `\n`;
       }
 
-      // Daftar varian dengan nama varian bold
+      // Daftar varian dengan nama bold
       variants.forEach(v => {
         const stock = parseInt(v.stock_count || 0);
         const harga = Number(v.price).toLocaleString('id-ID');
@@ -934,7 +935,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       });
 
     } else {
-      // Bagian tanpa varian (tetap seperti sebelumnya)
+      // Bagian tanpa varian
       const stock   = parseInt(product.stock_count || 0);
       const sold    = parseInt(product.sold_count || 0);
       const inStock = stock > 0;
