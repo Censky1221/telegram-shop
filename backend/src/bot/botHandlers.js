@@ -724,6 +724,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   const productId = parseInt(ctx.match[1]);
 
   try {
+    // Query data terbaru
     const { rows: [product] } = await pool.query(
       `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
        FROM products p
@@ -769,7 +770,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     variantButtons.push([Markup.button.callback('🔄 Refresh', `refresh_product_variants_${productId}`)]);
     variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
 
-    // Ini yang penting: edit pesan dengan data terbaru
+    // Edit pesan dengan data & keyboard baru
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard(variantButtons)
