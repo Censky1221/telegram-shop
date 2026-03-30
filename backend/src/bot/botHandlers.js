@@ -606,6 +606,54 @@ module.exports = function registerHandlers(bot, tenant) {
   bot.action('no_stock', (ctx) => ctx.answerCbQuery('Stok sedang habis.', { show_alert: true }));
   bot.action('qty_noop', (ctx) => { try { ctx.answerCbQuery(); } catch {} });
 
+  // ── Refresh Varian ─────────────────────────────────────────
+bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
+  try {
+    await ctx.answerCbQuery('🔄 Memperbarui data...');
+  } catch {}
+
+  const variantId = parseInt(ctx.match[1]);
+
+  try {
+    // Ambil data varian terbaru dari database
+    const { rows: [variant] } = await pool.query(
+      `SELECT pv.*, p.name AS product_name, p.id AS product_id,
+              COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
+              COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+       FROM product_variants pv 
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       JOIN products p ON p.id = pv.product_id
+       WHERE pv.id = $1 AND pv.tenant_id = $2 AND pv.is_active = true 
+       GROUP BY pv.id, p.name, p.id`,
+      [variantId, tenantId]
+    );
+
+    if (!variant) {
+      return ctx.answerCbQuery('❌ Varian tidak ditemukan.', { show_alert: true });
+    }
+
+    const stock   = parseInt(variant.stock_count || 0);
+    const sold    = parseInt(variant.sold_count || 0);
+    const inStock = stock > 0;
+
+    // Update cart qty jika ada
+    const cartKey = `${tenantId}_${ctx.from.id}`;
+    const currentQty = userCart[cartKey]?.qty || 1;
+
+    const text = `🏷 *${variant.product_name} - ${variant.name}*\n\n📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*`;
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      ...buildVariantKeyboard(variantId, currentQty, inStock, variant.product_id)
+    });
+
+    await ctx.answerCbQuery('✅ Data berhasil diperbarui');
+  } catch (err) {
+    console.error('refresh_variant error:', err);
+    await ctx.answerCbQuery('❌ Gagal memperbarui data', { show_alert: true });
+  }
+});
+
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
@@ -752,11 +800,23 @@ module.exports = function registerHandlers(bot, tenant) {
   }
 
   function buildVariantKeyboard(variantId, qty, inStock, productId) {
-    return Markup.inlineKeyboard([
-      [Markup.button.callback('➖',`qty_minus_v_${variantId}`), Markup.button.callback(`  ${qty}  `,'qty_noop'), Markup.button.callback('➕',`qty_plus_v_${variantId}`)],
-      inStock ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x'+qty+')' : ''} Sekarang`,`buy_v_${variantId}`)] : [Markup.button.callback('❌ Stok Habis','no_stock')],
-      [Markup.button.callback('🎟️ Pakai Voucher', `voucher_v_${variantId}`)],
-      [Markup.button.callback('◀️ Kembali ke Pilihan', productId ? `back_to_product_${productId}` : 'back_to_list')],
-    ]);
-  }
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('➖', `qty_minus_v_${variantId}`), 
+     Markup.button.callback(`  ${qty}  `, 'qty_noop'), 
+     Markup.button.callback('➕', `qty_plus_v_${variantId}`)],
+
+    inStock 
+      ? [Markup.button.callback(`🛒 Beli ${qty > 1 ? '(x'+qty+')' : ''} Sekarang`, `buy_v_${variantId}`)] 
+      : [Markup.button.callback('❌ Stok Habis', 'no_stock')],
+
+    [Markup.button.callback('🎟️ Pakai Voucher', `voucher_v_${variantId}`)],
+
+    // ── Tambahan Tombol Refresh ──
+    [Markup.button.callback('🔄 Refresh', `refresh_variant_${variantId}`)],
+
+    // Tombol Kembali (paling bawah)
+    [Markup.button.callback('◀️ Kembali ke Pilihan', 
+      productId ? `back_to_product_${productId}` : 'back_to_list')],
+  ]);
+}
 };
