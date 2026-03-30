@@ -715,7 +715,7 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
   }
 });
 
-// ── Refresh List Varian (Halaman Pilih Varian) ─────────────────
+// ── Refresh List Varian (halaman pilih varian) ─────────────────
 bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
     await ctx.answerCbQuery('🔄 Memperbarui daftar varian...');
@@ -724,7 +724,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   const productId = parseInt(ctx.match[1]);
 
   try {
-    // Ambil data produk + varian terbaru
+    // Ambil data produk + semua varian terbaru
     const { rows: [product] } = await pool.query(
       `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
        FROM products p
@@ -750,6 +750,8 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     }
 
     const sold = parseInt(product.sold_count || 0);
+    
+    // ←←← INI YANG DIPERBAIKI: Ambil waktu BARU setiap refresh
     const now = new Date().toLocaleTimeString('id-ID', { 
       hour: '2-digit', 
       minute: '2-digit', 
