@@ -895,25 +895,25 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     });
 
     if (variants.length > 0) {
-      // Format yang kamu inginkan
+      // Format sesuai keinginan kamu
       const sold = parseInt(product.sold_count || 0);
       
-      let text = `🏷 *${product.name}*\n`;
+      let text = `🏷 *${product.name}*\n\n`;                    // Baris kosong setelah nama produk
       text += `${sold} Terjual\n`;
 
-      // Deskripsi hanya ditampilkan jika ada isinya
+      // Deskripsi hanya muncul jika ada isinya
       if (product.description && product.description.trim() !== '') {
         text += `${product.description}\n\n`;
       } else {
         text += `\n`;
       }
 
-      // Daftar varian dengan nama bold
+      // Daftar varian
       variants.forEach(v => {
         const stock = parseInt(v.stock_count || 0);
         const harga = Number(v.price).toLocaleString('id-ID');
         const stokText = stock > 0 ? ` (Stok ${stock})` : ' - Habis ❌';
-        text += `**${v.name}** - Rp ${harga}${stokText}\n`;
+        text += `${v.name} - Rp ${harga}${stokText}\n`;
       });
 
       text += `\n⟲ Diperbarui pada ${now} WIB`;
@@ -935,7 +935,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       });
 
     } else {
-      // Bagian tanpa varian
+      // Bagian tanpa varian (tetap seperti sebelumnya)
       const stock   = parseInt(product.stock_count || 0);
       const sold    = parseInt(product.sold_count || 0);
       const inStock = stock > 0;
