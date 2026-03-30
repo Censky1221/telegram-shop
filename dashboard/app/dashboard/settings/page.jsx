@@ -95,7 +95,7 @@ export default function SettingsPage() {
             <li>Untuk channel <strong>private</strong>: forward pesan dari channel ke <code className="bg-blue-100 px-1 rounded">@userinfobot</code></li>
             <li>Bot akan balas dengan ID seperti <code className="bg-blue-100 px-1 rounded">-100xxxxxxxxxx</code></li>
             <li>Copy ID tersebut dan paste di field bawah</li>
-          </ol>
+        </ol>
         </div>
         <label className="block text-sm font-medium text-gray-700 mb-1">Telegram ID Admin / Username channel</label>
         <input

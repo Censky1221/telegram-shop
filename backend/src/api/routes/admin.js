@@ -190,10 +190,10 @@ router.get('/stocks/:productId', authMiddleware, async (req, res) => {
   try {
     let query, params;
     if (variantId) {
-      query  = `SELECT id, email, password, content, stock_type, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
+      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
       params = [variantId, req.admin.tenant_id];
     } else {
-      query  = `SELECT id, email, password, content, stock_type, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
+      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
       params = [req.params.productId, req.admin.tenant_id];
     }
     const { rows } = await pool.query(query, params);
@@ -207,49 +207,39 @@ router.post('/stocks/upload', authMiddleware, async (req, res) => {
   const { product_id, variant_id, stocks } = req.body;
   if (!product_id || !Array.isArray(stocks) || !stocks.length)
     return res.status(400).json({ error: 'product_id and stocks required' });
-
-  // Validasi per tipe stok
-  const valid = stocks.filter(s => {
-    if (s.stock_type === 'account') return s.email && s.password;
-    if (s.stock_type === 'cookie')  return s.content;
-    if (s.stock_type === 'service') return s.content;
-    return s.email && s.password; // default fallback
-  });
-
+  const valid = stocks.filter(s => s.email && s.password);
   if (!valid.length) return res.status(400).json({ error: 'No valid entries found' });
-
   try {
-    const inserted_rows = [];
-    for (const s of valid) {
-      const { rows: [row] } = await pool.query(
-        `INSERT INTO stocks
-           (product_id, variant_id, email, password, content, stock_type, status, tenant_id)
-         VALUES ($1, $2, $3, $4, $5, $6, 'available', $7)
-         RETURNING id`,
-        [
-          product_id,
-          variant_id || null,
-          s.email    || null,
-          s.password || null,
-          s.content  || null,
-          s.stock_type || 'account',
-          req.admin.tenant_id,
-        ]
+    let result;
+    if (variant_id) {
+      const values = valid.map((_, i) =>
+        `($1, $2, $${i * 2 + 3}, $${i * 2 + 4}, 'available', $${valid.length * 2 + 3})`
+      ).join(', ');
+      const params = [product_id, variant_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+      result = await pool.query(
+        `INSERT INTO stocks (product_id, variant_id, email, password, status, tenant_id) VALUES ${values}`, params
       );
-      inserted_rows.push(row);
+    } else {
+      const values = valid.map((_, i) =>
+        `($1, $${i * 2 + 2}, $${i * 2 + 3}, 'available', $${valid.length * 2 + 2})`
+      ).join(', ');
+      const params = [product_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+      result = await pool.query(
+        `INSERT INTO stocks (product_id, email, password, status, tenant_id) VALUES ${values}`, params
+      );
     }
-    res.json({ inserted: inserted_rows.length });
+    res.json({ inserted: result.rowCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 router.put('/stocks/:id', authMiddleware, async (req, res) => {
-  const { email, password, content } = req.body;
+  const { email, password } = req.body;
   try {
     const { rows: [s] } = await pool.query(
-      `UPDATE stocks SET email=$1, password=$2, content=$3 WHERE id=$4 AND tenant_id=$5 RETURNING *`,
-      [email, password, content || null, req.params.id, req.admin.tenant_id]
+      `UPDATE stocks SET email=$1, password=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+      [email, password, req.params.id, req.admin.tenant_id]
     );
     if (!s) return res.status(404).json({ error: 'Stock not found' });
     res.json(s);
@@ -371,18 +361,18 @@ router.post('/users/:id/deduct', authMiddleware, async (req, res) => {
 // ── Settings ──────────────────────────────────────────────────────
 router.get('/settings', authMiddleware, async (req, res) => {
   const { rows: [tenant] } = await pool.query(
-    `SELECT banner_file_id, terms, help_text, admin_telegram_id, service_done_message FROM tenants WHERE id=$1`,
+    `SELECT banner_file_id, terms, help_text, admin_telegram_id FROM tenants WHERE id=$1`,
     [req.admin.tenant_id]
   );
   res.json(tenant || {});
 });
 
 router.put('/settings', authMiddleware, async (req, res) => {
-  const { banner_file_id, terms, help_text, admin_telegram_id, service_done_message } = req.body;
+  const { banner_file_id, terms, help_text, admin_telegram_id } = req.body;
   await pool.query(
-    `UPDATE tenants SET banner_file_id=$1, terms=$2, help_text=$3, admin_telegram_id=$4, service_done_message=$5 WHERE id=$6`,
-    [banner_file_id || null, terms || null, help_text || null, admin_telegram_id || null, service_done_message || null, req.admin.tenant_id]
- );
+    `UPDATE tenants SET banner_file_id=$1, terms=$2, help_text=$3, admin_telegram_id=$4 WHERE id=$5`,
+    [banner_file_id || null, terms || null, help_text || null, admin_telegram_id || null, req.admin.tenant_id]
+  );
   res.json({ success: true });
 });
 
@@ -415,13 +405,21 @@ router.get('/stats', authMiddleware, async (req, res) => {
   const tid = req.admin.tenant_id;
   try {
     const [revToday, revWeek, revMonth, ordersPaid, ordersPending, usersTotal, usersNewWeek, topProducts, dailyChart] = await Promise.all([
+      // Pendapatan hari ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= CURRENT_DATE`, [tid]),
+      // Pendapatan minggu ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('week', NOW())`, [tid]),
+      // Pendapatan bulan ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('month', NOW())`, [tid]),
+      // Total paid
       pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='paid'`, [tid]),
+      // Total pending
       pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='pending'`, [tid]),
+      // Total user
       pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1`, [tid]),
+      // User baru 7 hari
       pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '7 days'`, [tid]),
+      // Top produk/varian
       pool.query(`
         SELECT p.name AS product_name, pv.name AS variant_name,
                COALESCE(SUM(o.qty),0) AS total_sold,
@@ -432,6 +430,7 @@ router.get('/stats', authMiddleware, async (req, res) => {
         WHERE o.tenant_id=$1 AND o.status='paid'
         GROUP BY p.name, pv.name
         ORDER BY total_sold DESC LIMIT 10`, [tid]),
+      // Grafik 14 hari
       pool.query(`
         SELECT DATE(paid_at) AS date, COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
         FROM orders WHERE tenant_id=$1 AND status='paid'
@@ -510,6 +509,7 @@ router.delete('/vouchers/:id', authMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
+// Validasi voucher dari bot
 router.post('/vouchers/validate', authMiddleware, async (req, res) => {
   const { code, user_id, amount } = req.body;
   try {
