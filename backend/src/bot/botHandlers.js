@@ -718,13 +718,13 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
 // ── Refresh List Varian (halaman pilih varian) ─────────────────
 bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
-    await ctx.answerCbQuery('🔄 Memperbarui daftar varian...');
+    await ctx.answerCbQuery('🔄 Memperbarui...');
   } catch (e) {}
 
   const productId = parseInt(ctx.match[1]);
 
   try {
-    // Ambil data produk + semua varian terbaru
+    // Ambil data terbaru
     const { rows: [product] } = await pool.query(
       `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
        FROM products p
@@ -734,7 +734,8 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     );
 
     const { rows: variants } = await pool.query(
-      `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+      `SELECT pv.*, 
+              COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
        FROM product_variants pv
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.product_id = $1 
@@ -750,8 +751,6 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     }
 
     const sold = parseInt(product.sold_count || 0);
-    
-    // ←←← INI YANG DIPERBAIKI: Ambil waktu BARU setiap refresh
     const now = new Date().toLocaleTimeString('id-ID', { 
       hour: '2-digit', 
       minute: '2-digit', 
@@ -772,15 +771,16 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     variantButtons.push([Markup.button.callback('🔄 Refresh', `refresh_product_variants_${productId}`)]);
     variantButtons.push([Markup.button.callback('◀️ Kembali ke Daftar', 'back_to_list')]);
 
+    // Edit pesan dengan data terbaru
     await ctx.editMessageText(text, {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard(variantButtons)
     });
 
-    await ctx.answerCbQuery('✅ Daftar varian diperbarui');
+    await ctx.answerCbQuery('✅ Berhasil diperbarui');
   } catch (err) {
     console.error('refresh_product_variants error:', err.message);
-    await ctx.answerCbQuery('❌ Gagal memperbarui daftar varian', { show_alert: true });
+    await ctx.answerCbQuery('❌ Gagal memperbarui data stok', { show_alert: true });
   }
 });
 
