@@ -718,29 +718,23 @@ bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
 // ── Refresh List Varian (halaman pilih varian) ─────────────────
 bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
-    await ctx.answerCbQuery('🔄 Memperbarui daftar varian...');
+    await ctx.answerCbQuery('🔄 Memperbarui...');
   } catch (e) {}
 
   const productId = parseInt(ctx.match[1]);
 
   try {
-    // Ambil data produk + sold count
     const { rows: [product] } = await pool.query(
-      `SELECT p.*, 
-              COUNT(s.id) FILTER (WHERE s.status = 'sold') AS sold_count
-       FROM products p 
+      `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
+       FROM products p
        LEFT JOIN stocks s ON s.product_id = p.id
-       WHERE p.id = $1 
-         AND p.tenant_id = $2 
-         AND p.is_active = true 
+       WHERE p.id = $1 AND p.tenant_id = $2 AND p.is_active = true
        GROUP BY p.id`,
       [productId, tenantId]
     );
 
-    // Ambil semua varian + stok tersedia
     const { rows: variants } = await pool.query(
-      `SELECT pv.*, 
-              COUNT(s.id) FILTER (WHERE s.status = 'available') AS stock_count
+      `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
        FROM product_variants pv
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.product_id = $1 
@@ -763,7 +757,26 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       timeZone: 'Asia/Jakarta' 
     });
 
-    const text = `🏷 *${product.name}*\n\n📝 ${product.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nPilih varian:\n⟲ Diperbarui pada ${now} WIB`;
+    // Format yang kamu inginkan
+    let text = `🏷 *${product.name}*\n`;
+    text += `${sold} Terjual\n`;
+
+    // Tampilkan deskripsi hanya jika ada isinya
+    if (product.description && product.description.trim() !== '') {
+      text += `${product.description}\n`;
+    }
+
+    text += `\n`;
+
+    // Daftar varian
+    variants.forEach(v => {
+      const stock = parseInt(v.stock_count || 0);
+      const harga = Number(v.price).toLocaleString('id-ID');
+      const stokText = stock > 0 ? ` (Stok ${stock})` : ' - Habis ❌';
+      text += `${v.name} - Rp ${harga}${stokText}\n`;
+    });
+
+    text += `\n⟲ Diperbarui pada ${now} WIB`;
 
     const variantButtons = variants.map(v => {
       const stock = parseInt(v.stock_count || 0);
@@ -781,13 +794,12 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       ...Markup.inlineKeyboard(variantButtons)
     });
 
-    await ctx.answerCbQuery('✅ Berhasil diperbarui');
+    await ctx.answerCbQuery('✅ Diperbarui');
   } catch (err) {
     console.error('refresh_product_variants error:', err.message);
-    await ctx.answerCbQuery('❌ Gagal memperbarui stok', { show_alert: true });
+    await ctx.answerCbQuery('❌ Gagal memperbarui', { show_alert: true });
   }
 });
-
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
