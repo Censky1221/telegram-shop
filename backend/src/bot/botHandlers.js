@@ -738,15 +738,20 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
 
     if (!isPaid) return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi.', { show_alert: true });
 
-    // Update status order menjadi paid
+    // Update status menjadi paid
     await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1 AND tenant_id=$2`, [orderId, tenantId]);
 
-    // ================== NOTIFIKASI ADMIN SAAT PEMBAYARAN QRIS BERHASIL ==================
+    console.log(`✅ Order #${orderId} telah dibayar via Pakasir. Mengirim notifikasi admin...`);
+
+    // ================== NOTIFIKASI ADMIN ==================
     const info = await getOrderInfo(orderId);
     if (info) {
       await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
+      console.log(`✅ Notifikasi admin untuk order #${orderId} telah dikirim.`);
+    } else {
+      console.warn(`⚠️ Tidak bisa mengambil info order #${orderId} untuk notifikasi`);
     }
-    // ===============================================================================
+    // =======================================================
 
     await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' })
       .catch(() => ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {}));
