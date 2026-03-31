@@ -802,32 +802,15 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
-  const frames = [
-    "🔄 Memuat daftar produk...\n[          ]   0%",
-    "🔄 Memuat daftar produk...\n[▓         ]  20%",
-    "🔄 Memuat daftar produk...\n[▓▓▓       ]  40%",
-    "🔄 Memuat daftar produk...\n[▓▓▓▓▓     ]  60%",
-    "🔄 Memuat daftar produk...\n[▓▓▓▓▓▓▓   ]  80%",
-    "🔄 Memuat daftar produk...\n[▓▓▓▓▓▓▓▓▓ ]  95%",
-    "✅ Daftar siap!               100%"
-  ];
-
-  const msg = await ctx.reply(frames[0]);
-
-  for (let i = 1; i < frames.length; i++) {
-    await new Promise(r => setTimeout(r, 200));
-    await ctx.telegram.editMessageText(
-      msg.chat.id, 
-      msg.message_id, 
-      null, 
-      frames[i]
-    ).catch(() => {});
+    const frames = ['⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%','🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%','🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜ 30%','🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜ 50%','🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜ 70%','🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜ 90%','🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦 100%'];
+    const msg = await ctx.reply(`⏳ Memuat produk...\n${frames[0]}`);
+    for (let i = 1; i < frames.length; i++) {
+      await new Promise(r => setTimeout(r, 200));
+      await ctx.telegram.editMessageText(msg.chat.id, msg.message_id, null, `⏳ Memuat produk...\n${frames[i]}`).catch(() => {});
+    }
+    await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+    await showProductList(ctx, 1);
   }
-
-  await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
-
-  await showProductList(ctx, 1);
-}
 
   async function showProductList(ctx, page, messageId = null) {
     try {
