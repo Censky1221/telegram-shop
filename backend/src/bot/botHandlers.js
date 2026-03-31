@@ -696,7 +696,11 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
   const orderId = parseInt(ctx.match[1]);
 
   try {
-    const { rows: [order] } = await pool.query(`SELECT o.*, u.telegram_id FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.tenant_id=$2`, [orderId, tenantId]);
+    const { rows: [order] } = await pool.query(
+      `SELECT o.*, u.telegram_id FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.tenant_id=$2`, 
+      [orderId, tenantId]
+    );
+
     if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
     if (order.status === 'paid') return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
     if (order.status === 'expired') return ctx.answerCbQuery('⏰ Pesanan sudah expired. Buat pesanan baru.', { show_alert: true });
@@ -734,12 +738,14 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
 
     if (!isPaid) return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi.', { show_alert: true });
 
-    // Update status menjadi paid
+    // Update status order menjadi paid
     await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1 AND tenant_id=$2`, [orderId, tenantId]);
 
-    // ================== NOTIFIKASI ADMIN SAAT PEMBAYARAN BERHASIL ==================
+    // ================== NOTIFIKASI ADMIN SAAT PEMBAYARAN QRIS BERHASIL ==================
     const info = await getOrderInfo(orderId);
-    if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
+    if (info) {
+      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
+    }
     // ===============================================================================
 
     await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' })
