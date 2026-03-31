@@ -802,15 +802,34 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {
-    const frames = ['⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜ 0%','🟦⬜⬜⬜⬜⬜⬜⬜⬜⬜ 10%','🟦🟦🟦⬜⬜⬜⬜⬜⬜⬜ 30%','🟦🟦🟦🟦🟦⬜⬜⬜⬜⬜ 50%','🟦🟦🟦🟦🟦🟦🟦⬜⬜⬜ 70%','🟦🟦🟦🟦🟦🟦🟦🟦🟦⬜ 90%','🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦 100%'];
-    const msg = await ctx.reply(`⏳ Memuat produk...\n${frames[0]}`);
-    for (let i = 1; i < frames.length; i++) {
-      await new Promise(r => setTimeout(r, 200));
-      await ctx.telegram.editMessageText(msg.chat.id, msg.message_id, null, `⏳ Memuat produk...\n${frames[i]}`).catch(() => {});
-    }
-    await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
-    await showProductList(ctx, 1);
+  const frames = [
+    "🔄 Memuat daftar produk...\n[          ]  0%",
+    "🔄 Memuat daftar produk...\n[█         ] 10%",
+    "🔄 Memuat daftar produk...\n[███       ] 30%",
+    "🔄 Memuat daftar produk...\n[█████     ] 50%",
+    "🔄 Memuat daftar produk...\n[███████   ] 70%",
+    "🔄 Memuat daftar produk...\n[█████████ ] 90%",
+    "✅ Memuat selesai!          100%"
+  ];
+
+  const msg = await ctx.reply(frames[0]);
+
+  for (let i = 1; i < frames.length; i++) {
+    await new Promise(r => setTimeout(r, 220)); // sedikit lebih lambat agar enak dilihat
+    await ctx.telegram.editMessageText(
+      msg.chat.id, 
+      msg.message_id, 
+      null, 
+      frames[i]
+    ).catch(() => {});
   }
+
+  // Hapus pesan loading
+  await ctx.telegram.deleteMessage(msg.chat.id, msg.message_id).catch(() => {});
+
+  // Lanjut ke daftar produk
+  await showProductList(ctx, 1);
+}
 
   async function showProductList(ctx, page, messageId = null) {
     try {
