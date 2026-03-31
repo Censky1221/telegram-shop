@@ -661,61 +661,6 @@ bot.action(/^refresh_product_(\d+)$/, async (ctx) => {
 
 
 // ── Refresh Varian (Detail Varian) ─────────────────────────────
-bot.action(/^refresh_variant_(\d+)$/, async (ctx) => {
-  try {
-    await ctx.answerCbQuery('🔄 Memperbarui stok...');
-  } catch (e) {}
-
-  const variantId = parseInt(ctx.match[1]);
-  const cartKey = `${tenantId}_${ctx.from.id}`;
-
-  try {
-    // Ambil data terbaru dari database
-    const { rows: [variant] } = await pool.query(`
-      SELECT pv.*, p.name AS product_name, p.id AS product_id,
-             COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count,
-             COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
-      FROM product_variants pv 
-      LEFT JOIN stocks s ON s.variant_id = pv.id
-      JOIN products p ON p.id = pv.product_id
-      WHERE pv.id = $1 
-        AND pv.tenant_id = $2 
-        AND pv.is_active = true 
-      GROUP BY pv.id, p.name, p.id
-    `, [variantId, tenantId]);
-
-    if (!variant) {
-      return ctx.answerCbQuery('❌ Varian tidak ditemukan', { show_alert: true });
-    }
-
-    const stock   = parseInt(variant.stock_count || 0);
-    const sold    = parseInt(variant.sold_count || 0);
-    const inStock = stock > 0;
-    const currentQty = userCart[cartKey]?.qty || 1;
-
-    const now = new Date().toLocaleTimeString('id-ID', { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit',
-      timeZone: 'Asia/Jakarta' 
-    });
-
-    const text = `🏷 *${variant.product_name} - ${variant.name}*\n\n📝 ${variant.description || 'Tidak ada deskripsi.'}\n\n━━━━━━━━━━━━━━━━━━━━\n💰 Harga: *Rp ${Number(variant.price).toLocaleString('id-ID')}* / akun\n📦 Stok: ${inStock ? `*${stock} tersedia* ✅` : '*Habis* ❌'}\n📊 Terjual: *${sold}*\n━━━━━━━━━━━━━━━━━━━━\n\nAtur jumlah lalu tekan *Beli Sekarang*\n⟲ Diperbarui pada ${now} WIB`;
-
-    // Update pesan + keyboard dengan data terbaru
-    await ctx.editMessageText(text, {
-      parse_mode: 'Markdown',
-      ...buildVariantKeyboard(variantId, currentQty, inStock, variant.product_id)
-    });
-
-    await ctx.answerCbQuery('✅ Stok & data berhasil diperbarui');
-  } catch (err) {
-    console.error('refresh_variant error:', err.message);
-    await ctx.answerCbQuery('❌ Gagal memperbarui data', { show_alert: true });
-  }
-});
-
-// ── Refresh List Varian (halaman pilih varian) ─────────────────
 bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
     await ctx.answerCbQuery('🔄 Memperbarui...');
@@ -726,8 +671,7 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   try {
     const { rows: [product] } = await pool.query(
       `SELECT p.*, COUNT(s.id) FILTER (WHERE s.status='sold') AS sold_count
-       FROM products p 
-       LEFT JOIN stocks s ON s.product_id = p.id
+       FROM products p LEFT JOIN stocks s ON s.product_id = p.id
        WHERE p.id = $1 AND p.tenant_id = $2 AND p.is_active = true
        GROUP BY p.id`,
       [productId, tenantId]
@@ -735,13 +679,9 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
 
     const { rows: variants } = await pool.query(
       `SELECT pv.*, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-       FROM product_variants pv 
-       LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pv.product_id = $1 
-         AND pv.tenant_id = $2 
-         AND pv.is_active = true
-       GROUP BY pv.id 
-       ORDER BY pv.id`,
+       FROM product_variants pv LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.product_id = $1 AND pv.tenant_id = $2 AND pv.is_active = true
+       GROUP BY pv.id ORDER BY pv.id`,
       [productId, tenantId]
     );
 
@@ -751,20 +691,14 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
 
     const sold = parseInt(product.sold_count || 0);
     const now = new Date().toLocaleTimeString('id-ID', { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit',
-      timeZone: 'Asia/Jakarta' 
+      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' 
     });
 
-    // Format yang kamu inginkan
     let text = `🏷 *${product.name}*\n\n`;
     text += `${sold} Terjual\n`;
 
     if (product.description && product.description.trim() !== '') {
       text += `${product.description}\n\n`;
-    } else {
-      text += `\n`;
     }
 
     variants.forEach(v => {
@@ -897,27 +831,20 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
     );
 
     const now = new Date().toLocaleTimeString('id-ID', { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit',
-      timeZone: 'Asia/Jakarta' 
+      hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Jakarta' 
     });
 
     if (variants.length > 0) {
-      // Format sesuai keinginan kamu
+      // === TAMPILAN DAFTAR VARIAN BERSIH ===
       const sold = parseInt(product.sold_count || 0);
       
-      let text = `🏷 *${product.name}*\n\n`;                    // Baris kosong setelah nama produk
+      let text = `🏷 *${product.name}*\n\n`;
       text += `${sold} Terjual\n`;
 
-      // Deskripsi hanya muncul jika ada isinya
       if (product.description && product.description.trim() !== '') {
         text += `${product.description}\n\n`;
-      } else {
-        text += `\n`;
       }
 
-      // Daftar varian
       variants.forEach(v => {
         const stock = parseInt(v.stock_count || 0);
         const harga = Number(v.price).toLocaleString('id-ID');
@@ -944,9 +871,9 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       });
 
     } else {
-      // Bagian tanpa varian (tetap seperti sebelumnya)
-      const stock   = parseInt(product.stock_count || 0);
-      const sold    = parseInt(product.sold_count || 0);
+      // Tanpa varian (tetap seperti sebelumnya)
+      const stock = parseInt(product.stock_count || 0);
+      const sold = parseInt(product.sold_count || 0);
       const inStock = stock > 0;
       userCart[`${tenantId}_${ctx.from.id}`] = { productId, qty: 1, type: 'product' };
 
