@@ -19,24 +19,24 @@ module.exports = function registerHandlers(bot, tenant) {
 
   // ── Notif admin ───────────────────────────────────────────
   async function notifyAdminOrder(order, productName, variantName, username, qty, total) {
-    try {
-      const { rows: [t] } = await pool.query(`SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]);
-      if (!t?.admin_telegram_id) return;
-      const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-      const userLabel = username ? `@${username}` : `ID: ${order.user_id}`;
-      await bot.telegram.sendMessage(
-        t.admin_telegram_id,
-        `🛒 *Order Baru!*\n\n` +
-        `🧾 ID: *#${order.id}*\n` +
-        `📦 Produk: *${prodLabel}*\n` +
-        `👤 User: ${userLabel}\n` +
-        `🛍 Qty: *${qty}*\n` +
-        `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
-        `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (err) { console.warn('notif admin error:', err.message); }
-  }
+  try {
+    const { rows: [t] } = await pool.query(`SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]);
+    if (!t?.admin_telegram_id) return;
+    const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
+    const userId    = String(order.user_id || '');
+    const maskedId  = userId.length > 4 ? userId.slice(0, -4) + '****' : userId;
+    await bot.telegram.sendMessage(
+      t.admin_telegram_id,
+      `🛒 *Order Baru!*\n\n` +
+      `📦 Produk: *${prodLabel}*\n` +
+      `👤 User ID: ${maskedId}\n` +
+      `🛍 Qty: *${qty}*\n` +
+      `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
+      `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch (err) { console.warn('notif admin error:', err.message); }
+}
 
   async function getOrderInfo(orderId) {
     const { rows: [info] } = await pool.query(
