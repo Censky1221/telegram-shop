@@ -18,35 +18,47 @@ module.exports = function registerHandlers(bot, tenant) {
   const tenantId = tenant.id;
 
   // ── Notif admin ───────────────────────────────────────────
-  async function notifyAdminOrder(order, productName, variantName, username, qty, total) {
+  // ── Notif admin ───────────────────────────────────────────
+async function notifyAdminOrder(order, productName, variantName, username, qty, total) {
   try {
     const { rows: [t] } = await pool.query(`SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]);
     if (!t?.admin_telegram_id) return;
-    const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-    const userId    = String(order.user_id || '');
-    const maskedId  = userId.length > 4 ? userId.slice(0, -4) + '****' : userId;
-    await bot.telegram.sendMessage(
-      t.admin_telegram_id,
+
+    const prodLabel = variantName 
+      ? `${productName} - ${variantName}` 
+      : productName;
+
+    const userLabel = username 
+      ? `@${username}` 
+      : `User ID: ${order.user_id}`;
+
+    const waktu = new Date().toLocaleString('id-ID', {
+      day: 'numeric',
+      month: 'numeric',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: 'Asia/Jakarta'
+    });
+
+    const message = 
       `🛒 *Order Baru!*\n\n` +
       `📦 Produk: *${prodLabel}*\n` +
-      `👤 User ID: ${maskedId}\n` +
+      `👤 ${userLabel}\n` +
       `🛍 Qty: *${qty}*\n` +
       `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
-      `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
+      `📅 ${waktu} WIB`;
+
+    await bot.telegram.sendMessage(
+      t.admin_telegram_id,
+      message,
       { parse_mode: 'Markdown' }
     );
-  } catch (err) { console.warn('notif admin error:', err.message); }
-}
-
-  async function getOrderInfo(orderId) {
-    const { rows: [info] } = await pool.query(
-      `SELECT p.name AS product_name, pv.name AS variant_name, u.username
-       FROM orders o JOIN products p ON p.id=o.product_id
-       LEFT JOIN product_variants pv ON pv.id=o.variant_id
-       JOIN users u ON u.id=o.user_id WHERE o.id=$1`, [orderId]
-    );
-    return info;
+  } catch (err) {
+    console.warn('notif admin error:', err.message);
   }
+}
 
   // ── /start ────────────────────────────────────────────────
   bot.start(async (ctx) => {
