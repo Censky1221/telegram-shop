@@ -382,82 +382,163 @@ async function notifyAdminOrder(order, productName, variantName, username, qty, 
   });
 
   // ── Konfirmasi saldo varian ───────────────────────────────
-  bot.action(/^confirm_saldo_v_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
-    try { await ctx.answerCbQuery('Memproses...'); } catch {}
-    const variantId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
-    const voucherId = parseInt(ctx.match[3]), discount = parseInt(ctx.match[4]);
-    const telegramId = ctx.from.id.toString();
-    await ctx.editMessageText('⏳ Memproses pembayaran...').catch(() => {});
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows: [user] } = await client.query('SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE', [telegramId, tenantId]);
-      const { rows: [variant] } = await client.query(`SELECT pv.*, p.name AS product_name, p.id AS product_id FROM product_variants pv JOIN products p ON p.id=pv.product_id WHERE pv.id=$1 AND pv.tenant_id=$2`, [variantId, tenantId]);
-      const total = (variant.price * qty) - discount;
-      if ((user.balance||0) < total) { await client.query('ROLLBACK'); return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {}); }
-      await client.query('UPDATE users SET balance=balance-$1 WHERE id=$2', [total, user.id]);
-      const { rows: [order] } = await client.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,$5,'paid',$6,NOW(),$7) RETURNING *`, [user.id, variant.product_id, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]);
-      if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
-      await client.query('COMMIT');
-      await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
-      const info = await getOrderInfo(order.id);
-      if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
-      const { assignStockAndDeliver } = require('../services/stockService');
-      await assignStockAndDeliver(order, tenantId);
-    } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_v error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
-    finally { client.release(); }
-  });
+bot.action(/^confirm_saldo_v_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCbQuery('Memproses...'); } catch {}
 
-  // ── Bayar saldo produk ────────────────────────────────────
-  bot.action(/^pay_saldo_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
-    try { await ctx.answerCbQuery(); } catch {}
-    const productId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
-    const voucherId = ctx.match[3] ? parseInt(ctx.match[3]) : null;
-    const discount  = ctx.match[4] ? parseInt(ctx.match[4]) : 0;
-    const telegramId = ctx.from.id.toString();
-    try {
-      const { rows: [user] } = await pool.query('SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2', [telegramId, tenantId]);
-      if (!user) return ctx.editMessageText('Silakan kirim /start terlebih dahulu.').catch(() => {});
-      const { rows: [product] } = await pool.query(`SELECT * FROM products WHERE id=$1 AND tenant_id=$2 AND is_active=true`, [productId, tenantId]);
-      if (!product) return ctx.editMessageText('Produk tidak ditemukan.').catch(() => {});
-      const total = (product.price * qty) - discount;
-      if ((user.balance||0) < total) return ctx.editMessageText(`❌ *Saldo tidak cukup!*\n\n💰 Saldo: *Rp ${Number(user.balance||0).toLocaleString('id-ID')}*\n🧾 Total: *Rp ${Number(total).toLocaleString('id-ID')}*`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('🔙 Kembali','cancel_buy')]]) }).catch(() => {});
-      const { rows: [sc] } = await pool.query(`SELECT COUNT(*) AS cnt FROM stocks WHERE product_id=$1 AND tenant_id=$2 AND status='available' AND variant_id IS NULL`, [productId, tenantId]);
-      if (parseInt(sc.cnt) < qty) return ctx.editMessageText(`Stok tidak cukup. Tersedia: ${sc.cnt}`).catch(() => {});
-      const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
-      await ctx.editMessageText(
-        `✅ *Konfirmasi Pembelian*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n💳 Saldo setelah bayar: *Rp ${Number((user.balance||0)-total).toLocaleString('id-ID')}*\n\nLanjutkan?`,
-        { parse_mode: 'Markdown', ...Markup.inlineKeyboard([[Markup.button.callback('✅ Ya, Bayar Sekarang',`confirm_saldo_p_${productId}_${qty}_${voucherId||0}_${discount}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]) }
-      ).catch(() => {});
-    } catch (err) { console.error('pay_saldo_p error:', err); ctx.editMessageText('Terjadi kesalahan.').catch(() => {}); }
-  });
+  const variantId = parseInt(ctx.match[1]);
+  const qty       = parseInt(ctx.match[2]);
+  const voucherId = parseInt(ctx.match[3]);
+  const discount  = parseInt(ctx.match[4]);
+  const telegramId = ctx.from.id.toString();
 
-  // ── Konfirmasi saldo produk ───────────────────────────────
-  bot.action(/^confirm_saldo_p_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
-    try { await ctx.answerCbQuery('Memproses...'); } catch {}
-    const productId = parseInt(ctx.match[1]), qty = parseInt(ctx.match[2]);
-    const voucherId = parseInt(ctx.match[3]), discount = parseInt(ctx.match[4]);
-    const telegramId = ctx.from.id.toString();
-    await ctx.editMessageText('⏳ Memproses pembayaran...').catch(() => {});
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const { rows: [user] } = await client.query('SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE', [telegramId, tenantId]);
-      const { rows: [product] } = await client.query(`SELECT * FROM products WHERE id=$1 AND tenant_id=$2`, [productId, tenantId]);
-      const total = (product.price * qty) - discount;
-      if ((user.balance||0) < total) { await client.query('ROLLBACK'); return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {}); }
-      await client.query('UPDATE users SET balance=balance-$1 WHERE id=$2', [total, user.id]);
-      const { rows: [order] } = await client.query(`INSERT INTO orders (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id) VALUES ($1,$2,$3,$4,'paid',$5,NOW(),$6) RETURNING *`, [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]);
-      if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
-      await client.query('COMMIT');
-      await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
-      const info = await getOrderInfo(order.id);
-      if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
-      const { assignStockAndDeliver } = require('../services/stockService');
-      await assignStockAndDeliver(order, tenantId);
-    } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_p error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
-    finally { client.release(); }
-  });
+  await ctx.editMessageText('⏳ Memproses pembayaran...').catch(() => {});
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [user] } = await client.query(
+      'SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE', 
+      [telegramId, tenantId]
+    );
+
+    const { rows: [variant] } = await client.query(`
+      SELECT pv.*, p.name AS product_name, p.id AS product_id 
+      FROM product_variants pv 
+      JOIN products p ON p.id = pv.product_id 
+      WHERE pv.id = $1 AND pv.tenant_id = $2`, 
+      [variantId, tenantId]
+    );
+
+    if (!variant) throw new Error('Varian tidak ditemukan');
+
+    const total = (variant.price * qty) - discount;
+
+    if ((user.balance || 0) < total) {
+      await client.query('ROLLBACK');
+      return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {});
+    }
+
+    await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [total, user.id]);
+
+    const { rows: [order] } = await client.query(`
+      INSERT INTO orders 
+      (user_id, product_id, variant_id, payment_id, amount, status, qty, paid_at, tenant_id) 
+      VALUES ($1, $2, $3, $4, $5, 'paid', $6, NOW(), $7) 
+      RETURNING *`,
+      [user.id, variant.product_id, variantId, `SALDO-${Date.now()}`, total, qty, tenantId]
+    );
+
+    if (voucherId > 0) {
+      await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1, $2, $3)`, 
+        [voucherId, user.id, order.id]);
+    }
+
+    await client.query('COMMIT');
+
+    // Notifikasi admin
+    const info = await getOrderInfo?.(order.id);   // tambah ? untuk aman
+    if (info) {
+      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
+    }
+
+    await ctx.editMessageText(
+      `✅ *Pembayaran Berhasil!*\n\n` +
+      `📦 ${variant.product_name} - ${variant.name} x${qty}\n` +
+      `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
+      `📨 Akun sedang dikirim...`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+
+    const { assignStockAndDeliver } = require('../services/stockService');
+    await assignStockAndDeliver(order, tenantId);
+
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('confirm_saldo_v error:', err);
+    await ctx.editMessageText('❌ Terjadi kesalahan saat memproses pembayaran.').catch(() => {});
+  } finally {
+    client.release();
+  }
+});
+
+// ── Konfirmasi saldo produk ───────────────────────────────
+bot.action(/^confirm_saldo_p_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCbQuery('Memproses...'); } catch {}
+
+  const productId = parseInt(ctx.match[1]);
+  const qty       = parseInt(ctx.match[2]);
+  const voucherId = parseInt(ctx.match[3]);
+  const discount  = parseInt(ctx.match[4]);
+  const telegramId = ctx.from.id.toString();
+
+  await ctx.editMessageText('⏳ Memproses pembayaran...').catch(() => {});
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [user] } = await client.query(
+      'SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE', 
+      [telegramId, tenantId]
+    );
+
+    const { rows: [product] } = await client.query(
+      `SELECT * FROM products WHERE id=$1 AND tenant_id=$2`, 
+      [productId, tenantId]
+    );
+
+    if (!product) throw new Error('Produk tidak ditemukan');
+
+    const total = (product.price * qty) - discount;
+
+    if ((user.balance || 0) < total) {
+      await client.query('ROLLBACK');
+      return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {});
+    }
+
+    await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [total, user.id]);
+
+    const { rows: [order] } = await client.query(`
+      INSERT INTO orders 
+      (user_id, product_id, payment_id, amount, status, qty, paid_at, tenant_id) 
+      VALUES ($1, $2, $3, $4, 'paid', $5, NOW(), $6) 
+      RETURNING *`,
+      [user.id, productId, `SALDO-${Date.now()}`, total, qty, tenantId]
+    );
+
+    if (voucherId > 0) {
+      await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1, $2, $3)`, 
+        [voucherId, user.id, order.id]);
+    }
+
+    await client.query('COMMIT');
+
+    // Notifikasi admin
+    const info = await getOrderInfo?.(order.id);
+    if (info) {
+      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
+    }
+
+    await ctx.editMessageText(
+      `✅ *Pembayaran Berhasil!*\n\n` +
+      `📦 ${product.name} x${qty}\n` +
+      `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n` +
+      `📨 Akun sedang dikirim...`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+
+    const { assignStockAndDeliver } = require('../services/stockService');
+    await assignStockAndDeliver(order, tenantId);
+
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('confirm_saldo_p error:', err);
+    await ctx.editMessageText('❌ Terjadi kesalahan saat memproses pembayaran.').catch(() => {});
+  } finally {
+    client.release();
+  }
+});
 
   // ── QRIS varian ───────────────────────────────────────────
   bot.action(/^pay_qris_v_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
