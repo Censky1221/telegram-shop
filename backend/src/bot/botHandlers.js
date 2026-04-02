@@ -436,11 +436,9 @@ bot.action(/^confirm_saldo_v_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
 
     await client.query('COMMIT');
 
-    // Notifikasi admin
-    const info = await getOrderInfo?.(order.id);   // tambah ? untuk aman
-    if (info) {
-      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
-    }
+    // Notifikasi admin (sementara dinonaktifkan dulu)
+    // const info = await getOrderInfo?.(order.id);
+    // if (info) await notifyAdminOrder(...);
 
     await ctx.editMessageText(
       `✅ *Pembayaran Berhasil!*\n\n` +
@@ -513,12 +511,6 @@ bot.action(/^confirm_saldo_p_(\d+)_(\d+)_(\d+)_(\d+)$/, async (ctx) => {
     }
 
     await client.query('COMMIT');
-
-    // Notifikasi admin
-    const info = await getOrderInfo?.(order.id);
-    if (info) {
-      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
-    }
 
     await ctx.editMessageText(
       `✅ *Pembayaran Berhasil!*\n\n` +
