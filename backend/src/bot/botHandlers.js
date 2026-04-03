@@ -552,31 +552,100 @@ module.exports = function registerHandlers(bot, tenant) {
   });
 
   // ── Cek Pakasir ───────────────────────────────────────────
-  bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
-    try { await ctx.answerCbQuery('Mengecek pembayaran...'); } catch {}
-    const orderId = parseInt(ctx.match[1]);
-    try {
-      const { rows: [order] } = await pool.query(`SELECT o.*, u.telegram_id FROM orders o JOIN users u ON u.id=o.user_id WHERE o.id=$1 AND o.tenant_id=$2`, [orderId, tenantId]);
-      if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
-      if (order.status === 'paid') return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
-      if (order.status === 'expired') return ctx.answerCbQuery('⏰ Pesanan sudah expired. Buat pesanan baru.', { show_alert: true });
-      const { rows: [tenantConfig] } = await pool.query(`SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, [tenantId]);
-      let checkResp;
-      const endpoints = [`${PAKASIR_URL}/transactionstatus`,`${PAKASIR_URL}/transaction/check`,`${PAKASIR_URL}/transaction/status`,`${PAKASIR_URL}/transactioncheck`];
-      for (const endpoint of endpoints) {
-        try { checkResp = await axios.post(endpoint, { project: tenantConfig.pakasir_project_slug, order_id: order.payment_id, api_key: tenantConfig.pakasir_api_key }, { headers: { 'Content-Type': 'application/json' } }); break; }
-        catch { checkResp = null; }
+bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
+  try { await ctx.answerCbQuery('Mengecek pembayaran...'); } catch {}
+
+  const orderId = parseInt(ctx.match[1]);
+
+  try {
+    console.log(`[CHECK PAKASIR] Order ID: ${orderId}`);
+
+    const { rows: [order] } = await pool.query(`
+      SELECT o.*, u.telegram_id 
+      FROM orders o 
+      JOIN users u ON u.id = o.user_id 
+      WHERE o.id = $1 AND o.tenant_id = $2`, 
+      [orderId, tenantId]
+    );
+
+    if (!order) {
+      console.log(`Order ${orderId} tidak ditemukan`);
+      return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
+    }
+
+    if (order.status === 'paid') {
+      return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
+    }
+
+    if (order.status === 'expired') {
+      return ctx.answerCbQuery('⏰ Pesanan sudah expired.', { show_alert: true });
+    }
+
+    // Cek status ke Pakasir
+    const { rows: [tenantConfig] } = await pool.query(
+      `SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, 
+      [tenantId]
+    );
+
+    let checkResp;
+    const endpoints = [
+      `${PAKASIR_URL}/transactionstatus`,
+      `${PAKASIR_URL}/transaction/check`,
+      `${PAKASIR_URL}/transaction/status`,
+      `${PAKASIR_URL}/transactioncheck`
+    ];
+
+    for (const endpoint of endpoints) {
+      try {
+        checkResp = await axios.post(endpoint, {
+          project: tenantConfig.pakasir_project_slug,
+          order_id: order.payment_id,
+          api_key: tenantConfig.pakasir_api_key
+        }, { headers: { 'Content-Type': 'application/json' } });
+        break;
+      } catch (e) {
+        checkResp = null;
       }
-      if (!checkResp) return ctx.answerCbQuery('❌ Tidak dapat cek status pembayaran.', { show_alert: true });
-      const paymentData = checkResp.data?.payment || checkResp.data;
-      const isPaid = paymentData?.status==='paid' || paymentData?.payment_status==='paid' || paymentData?.is_paid===true || paymentData?.paid===true;
-      if (!isPaid) return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi.', { show_alert: true });
-      await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1 AND tenant_id=$2`, [orderId, tenantId]);
-      await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {}));
-      const { assignStockAndDeliver } = require('../services/stockService');
-      await assignStockAndDeliver(order, tenantId);
-    } catch (err) { console.error('check_pakasir error:', err); ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true }); }
-  });
+    }
+
+    if (!checkResp) {
+      return ctx.answerCbQuery('❌ Tidak dapat terhubung ke Pakasir.', { show_alert: true });
+    }
+
+    const paymentData = checkResp.data?.payment || checkResp.data;
+    const isPaid = paymentData?.status === 'paid' || 
+                   paymentData?.payment_status === 'paid' || 
+                   paymentData?.status === 'completed' ||
+                   paymentData?.is_paid === true;
+
+    if (!isPaid) {
+      return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi nanti.', { show_alert: true });
+    }
+
+    // Update menjadi paid
+    await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, [orderId]);
+
+    console.log(`Order ${orderId} berhasil diupdate menjadi PAID`);
+
+    // Notifikasi user
+    await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' })
+      .catch(() => ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }));
+
+    // Kirim produk
+    const { assignStockAndDeliver } = require('../services/stockService');
+    await assignStockAndDeliver(order, tenantId);
+
+    // Notifikasi admin (format baru)
+    const info = await getOrderInfo?.(orderId);
+    if (info) {
+      await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
+    }
+
+  } catch (err) {
+    console.error('check_pakasir error:', err);
+    ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true }).catch(() => {});
+  }
+});
 
   // ── Cancel ────────────────────────────────────────────────
   bot.action('cancel_buy', async (ctx) => {
