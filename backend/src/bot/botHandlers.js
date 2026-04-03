@@ -591,12 +591,12 @@ bot.action(/^pay_qris_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
 
   // ── Cek Pakasir ───────────────────────────────────────────
 bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
-  try { await ctx.answerCbQuery('Mengecek pembayaran...'); } catch {}
+  try { await ctx.answerCbQuery('Mengecek pembayaran...'); } catch (e) {}
 
   const orderId = parseInt(ctx.match[1]);
 
   try {
-    console.log(`[CHECK PAKASIR] Order ID: ${orderId}`);
+    console.log(`[CHECK PAKASIR] Dipanggil untuk Order ID: ${orderId}`);
 
     const { rows: [order] } = await pool.query(`
       SELECT o.*, u.telegram_id 
@@ -607,7 +607,7 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
     );
 
     if (!order) {
-      console.log(`Order ${orderId} tidak ditemukan`);
+      console.log(`Order ${orderId} tidak ditemukan di database`);
       return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
     }
 
@@ -615,17 +615,12 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
       return ctx.answerCbQuery('✅ Pesanan ini sudah dibayar!', { show_alert: true });
     }
 
-    if (order.status === 'expired') {
-      return ctx.answerCbQuery('⏰ Pesanan sudah expired.', { show_alert: true });
-    }
-
-    // Cek status ke Pakasir
+    // Cek ke Pakasir
     const { rows: [tenantConfig] } = await pool.query(
-      `SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, 
-      [tenantId]
+      `SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, [tenantId]
     );
 
-    let checkResp;
+    let checkResp = null;
     const endpoints = [
       `${PAKASIR_URL}/transactionstatus`,
       `${PAKASIR_URL}/transaction/check`,
@@ -642,30 +637,28 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
         }, { headers: { 'Content-Type': 'application/json' } });
         break;
       } catch (e) {
-        checkResp = null;
+        console.log(`Endpoint ${endpoint} gagal`);
       }
     }
 
     if (!checkResp) {
-      return ctx.answerCbQuery('❌ Tidak dapat terhubung ke Pakasir.', { show_alert: true });
+      return ctx.answerCbQuery('❌ Tidak dapat terhubung ke Pakasir. Coba lagi.', { show_alert: true });
     }
 
     const paymentData = checkResp.data?.payment || checkResp.data;
-    const isPaid = paymentData?.status === 'paid' || 
-                   paymentData?.payment_status === 'paid' || 
-                   paymentData?.status === 'completed' ||
+    const isPaid = ['paid', 'completed', 'success'].includes(String(paymentData?.status || paymentData?.payment_status || '').toLowerCase()) ||
                    paymentData?.is_paid === true;
 
     if (!isPaid) {
-      return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi nanti.', { show_alert: true });
+      return ctx.answerCbQuery('❌ Pembayaran belum diterima oleh Pakasir. Coba lagi dalam 10 detik.', { show_alert: true });
     }
 
-    // Update menjadi paid
+    // Update status
     await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, [orderId]);
 
-    console.log(`Order ${orderId} berhasil diupdate menjadi PAID`);
+    console.log(`✅ Order ${orderId} berhasil diupdate menjadi PAID`);
 
-    // Notifikasi user
+    // Tampilkan ke user
     await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' })
       .catch(() => ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }));
 
@@ -673,7 +666,7 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
     const { assignStockAndDeliver } = require('../services/stockService');
     await assignStockAndDeliver(order, tenantId);
 
-    // Notifikasi admin (format baru)
+    // Notifikasi admin
     const info = await getOrderInfo?.(orderId);
     if (info) {
       await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
@@ -681,7 +674,7 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
 
   } catch (err) {
     console.error('check_pakasir error:', err);
-    ctx.answerCbQuery(`Gagal cek pembayaran: ${err.message}`, { show_alert: true }).catch(() => {});
+    ctx.answerCbQuery(`Gagal: ${err.message}`, { show_alert: true }).catch(() => {});
   }
 });
 
