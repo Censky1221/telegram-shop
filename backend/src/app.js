@@ -2,24 +2,23 @@ require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
 
-const { loadAllTenants, stopAllBots, getAllBots } = require('./bot/tenantManager');
-
+const { loadAllTenants, stopAllBots } = require('./bot/tenantManager');
 const productsRouter = require('./api/routes/products');
 const ordersRouter   = require('./api/routes/orders');
 const webhookRouter  = require('./api/routes/webhook');
 const adminRouter    = require('./api/routes/admin');
 const tenantRouter   = require('./api/routes/tenant');
 const superRouter    = require('./api/routes/super');
+// ✅ TAMBAH INI
+const monitorRouter = require('./api/routes/monitor');
+app.use('/monitor', monitorRouter);
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
 // ── Middleware ──────────────────────────────────────────────
 app.use(cors());
-
-// webhook BEFORE json (biar aman raw body kalau perlu)
 app.use('/api/webhook', webhookRouter);
-
 app.use(express.json());
 
 // ── Routes ──────────────────────────────────────────────────
@@ -28,14 +27,13 @@ app.use('/api/orders',   ordersRouter);
 app.use('/api/admin',    adminRouter);
 app.use('/api/tenant',   tenantRouter);
 app.use('/api/super',    superRouter);
-app.use('/monitor', require('./api/routes/monitor'));
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 
-// ── DB & Helpers ────────────────────────────────────────────
+// ── Auto expire orders pending > 15 menit ─────────────────
 const { pool } = require('./db/pool');
+const { getBotByTenantId } = require('./bot/tenantManager');
 
-// ── AUTO EXPIRE ORDER ───────────────────────────────────────
 setInterval(async () => {
   try {
     const { rows: expiredOrders } = await pool.query(
@@ -47,25 +45,19 @@ setInterval(async () => {
 
     for (const order of expiredOrders) {
       try {
+        // Notif user via bot
         const { rows: [user] } = await pool.query(
-          `SELECT telegram_id FROM users WHERE id=$1`,
-          [order.user_id]
+          `SELECT telegram_id FROM users WHERE id=$1`, [order.user_id]
         );
-
         if (!user) continue;
-
-        const { getBotByTenantId } = require('./bot/tenantManager');
         const bot = getBotByTenantId(order.tenant_id);
         if (!bot) continue;
-
         await bot.telegram.sendMessage(
           user.telegram_id,
-          `⏰ *Pesanan Expired!*\n\n🧾 Order #${order.id} telah dibatalkan otomatis karena tidak dibayar dalam 5 menit.\n\nSilakan buat pesanan baru.`,
+          `⏰ *Pesanan Expired!*\n\n🧾 Order #${order.id} telah dibatalkan otomatis karena tidak dibayar dalam 5 menit.\n\nSilakan buat pesanan baru jika masih ingin membeli.`,
           { parse_mode: 'Markdown' }
         );
-      } catch (e) {
-        console.warn(`Notify expired order #${order.id} failed:`, e.message);
-      }
+      } catch (e) { console.warn(`Notify expired order #${order.id} failed:`, e.message); }
     }
 
     if (expiredOrders.length > 0) {
@@ -74,9 +66,9 @@ setInterval(async () => {
   } catch (err) {
     console.error('Auto expire error:', err.message);
   }
-}, 60 * 1000);
+}, 60 * 1000); // cek setiap 1 menit
 
-// ── NOTIFY ADMIN ORDER BARU ─────────────────────────────────
+// ── Fungsi notif order masuk ke admin ────────────────────
 const notifyAdminNewOrder = async (tenantId, order, productName, variantName, username, qty, total) => {
   try {
     const { getBotByTenantId } = require('./bot/tenantManager');
@@ -84,10 +76,8 @@ const notifyAdminNewOrder = async (tenantId, order, productName, variantName, us
     if (!bot) return;
 
     const { rows: [tenant] } = await pool.query(
-      `SELECT admin_telegram_id FROM tenants WHERE id=$1`,
-      [tenantId]
+      `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
     );
-
     if (!tenant?.admin_telegram_id) return;
 
     const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
@@ -104,49 +94,16 @@ const notifyAdminNewOrder = async (tenantId, order, productName, variantName, us
       `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
       { parse_mode: 'Markdown' }
     );
-  } catch (err) {
-    console.warn('notif admin error:', err.message);
-  }
+  } catch (err) { console.warn('notif admin error:', err.message); }
 };
 
 module.exports.notifyAdminNewOrder = notifyAdminNewOrder;
 
-// ── START SERVER ────────────────────────────────────────────
+// ── Start ───────────────────────────────────────────────────
 app.listen(PORT, async () => {
-  console.log(`🚀 API running on http://localhost:${PORT}`);
-
-  // load semua bot tenant
+  console.log(`API running on http://localhost:${PORT}`);
   await loadAllTenants();
-
-  // start stock listener (ANTI DOUBLE INIT)
-  if (!global.stockListenerStarted) {
-    global.stockListenerStarted = true;
-
-    const startStockListener = require('./services/stockListener');
-
-    const bots = getAllBots();
-
-    for (const bot of bots) {
-      try {
-        startStockListener(bot);
-      } catch (err) {
-        console.error('Listener start error:', err.message);
-      }
-    }
-
-    console.log('👂 Stock listener started (all tenants)');
-  }
 });
 
-// ── SHUTDOWN HANDLER ────────────────────────────────────────
-process.once('SIGINT', () => {
-  console.log('Stopping bots...');
-  stopAllBots();
-  process.exit(0);
-});
-
-process.once('SIGTERM', () => {
-  console.log('Stopping bots...');
-  stopAllBots();
-  process.exit(0);
-});
+process.once('SIGINT',  () => { stopAllBots(); process.exit(0); });
+process.once('SIGTERM', () => { stopAllBots(); process.exit(0); });
