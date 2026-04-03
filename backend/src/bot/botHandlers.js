@@ -594,7 +594,23 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
       WHERE o.id=$1 AND o.tenant_id=$2`, [orderId, tenantId]);
 
     if (!order) return ctx.answerCbQuery('Pesanan tidak ditemukan.', { show_alert: true });
-    if (order.status === 'paid') return ctx.answerCbQuery('✅ Sudah dibayar!', { show_alert: true });
+
+    // 🔒 ANTI DOUBLE PROCESS (TARUH DI SINI)
+    const { rows: [check] } = await pool.query(
+      'SELECT status FROM orders WHERE id=$1',
+      [orderId]
+    );
+
+    if (check.status !== 'pending') {
+       return ctx.answerCbQuery('⚠️ Order sudah diproses sebelumnya', { show_alert: true });
+    }
+    if (order.status === 'done') {
+      return ctx.answerCbQuery('⚠️ Order sudah selesai diproses', { show_alert: true });
+    }
+
+    if (order.status === 'processing') {
+      return ctx.answerCbQuery('⏳ Order sedang diproses...', { show_alert: true });
+    }
 
     const { rows: [tenantConfig] } = await pool.query(`SELECT pakasir_api_key, pakasir_project_slug FROM tenants WHERE id=$1`, [tenantId]);
 
@@ -624,13 +640,22 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
 
     if (!isPaid) return ctx.answerCbQuery('❌ Pembayaran belum diterima. Coba lagi.', { show_alert: true });
 
-    await pool.query(`UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, [orderId]);
-
-    await ctx.editMessageCaption(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' })
-      .catch(() => ctx.editMessageText(`✅ *Pembayaran Diterima!*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }));
+    // 🔒 Lock + set processing
+    await pool.query(`
+      UPDATE orders 
+      SET status='processing', paid_at=NOW() 
+      WHERE id=$1
+    `, [orderId]);
 
     const { assignStockAndDeliver } = require('../services/stockService');
     await assignStockAndDeliver(order, tenantId);
+
+    // ✅ selesai
+    await pool.query(`
+      UPDATE orders 
+      SET status='done' 
+      WHERE id=$1
+    `, [orderId]);
 
     const info = await getOrderInfo(order.id);
     if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
