@@ -7,7 +7,9 @@ export default function MonitorPage() {
 
   async function fetchData() {
     try {
-      const res = await fetch('http://localhost:3001/monitor/stocks');
+      const API = process.env.NEXT_PUBLIC_API_URL;
+
+      const res = await fetch(`${API}/monitor/stocks`);
       const json = await res.json();
       setData(json);
     } catch (e) {

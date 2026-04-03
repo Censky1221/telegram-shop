@@ -28,6 +28,28 @@ app.use('/api/admin',    adminRouter);
 app.use('/api/tenant',   tenantRouter);
 app.use('/api/super',    superRouter);
 
+app.get('/monitor/stocks', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT  
+        s.order_id,
+        COUNT(*) as total,
+        o.qty
+      FROM stocks s
+      JOIN orders o ON o.id = s.order_id
+      WHERE s.order_id IS NOT NULL
+      GROUP BY s.order_id, o.qty
+      ORDER BY s.order_id DESC
+      LIMIT 20
+    `);
+
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 
 // ── Auto expire orders pending > 15 menit ─────────────────
