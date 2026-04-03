@@ -28,7 +28,7 @@ app.use('/api/orders',   ordersRouter);
 app.use('/api/admin',    adminRouter);
 app.use('/api/tenant',   tenantRouter);
 app.use('/api/super',    superRouter);
-app.use('/monitor', require('./routes/monitor'));
+app.use('/monitor', require('./api/routes/monitor'));
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 
