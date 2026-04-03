@@ -39,7 +39,6 @@ router.post('/tripay', express.raw({ type: '*/*' }), async (req, res) => {
 // ── Pakasir webhook ──────────────────────────────────────────
 router.post('/pakasir', express.json(), async (req, res) => {
   try {
-    // Log SEMUA field yang dikirim Pakasir — penting untuk debug
     console.log('=== Pakasir webhook received ===');
     console.log('Headers:', JSON.stringify(req.headers));
     console.log('Body:', JSON.stringify(req.body));
@@ -47,17 +46,14 @@ router.post('/pakasir', express.json(), async (req, res) => {
 
     const body = req.body;
 
-    // Ambil order_id — Pakasir bisa pakai field berbeda
-    const orderId = body.order_id || body.merchant_ref || body.reference || body.id;
+    // Ambil order_id dari berbagai kemungkinan field yang dikirim Pakasir
+    const orderId = body.order_id || body.merchant_ref || body.reference || body.id || body.payment_id;
 
-    // Ambil status — bisa pakai field berbeda
-    const status  = body.status || body.payment_status || body.transaction_status;
+    // Ambil status
+    const status = body.status || body.payment_status || body.transaction_status || body.payment_state;
 
     // Ambil amount
-    const amount  = body.amount || body.total_payment || body.received;
-
-    // Ambil project
-    const project = body.project || body.project_slug;
+    const amount = body.amount || body.total_payment || body.received || body.final_amount;
 
     console.log('Pakasir webhook parsed - order_id:', orderId, '| status:', status, '| amount:', amount);
 
@@ -66,77 +62,64 @@ router.post('/pakasir', express.json(), async (req, res) => {
       return res.json({ status: 'missing order_id' });
     }
 
-    // Status yang dianggap PAID — tambah/kurangi sesuai response Pakasir
-    const PAID_STATUSES = ['completed', 'paid', 'success', 'PAID', 'SUCCESS', 'settlement', 'capture'];
-    const isPaid = PAID_STATUSES.includes(status);
+    // Status yang dianggap sebagai berhasil bayar
+    const PAID_STATUSES = ['completed', 'paid', 'success', 'PAID', 'SUCCESS', 'settlement', 'capture', 'succeeded'];
+    const isPaid = PAID_STATUSES.includes(String(status).toLowerCase());
 
     if (!isPaid) {
-      console.log('Pakasir webhook: status not paid:', status, '— ignored');
+      console.log('Pakasir webhook: status not paid → ignored');
       return res.json({ status: 'ignored', received_status: status });
     }
 
-    // Cari order
-    const { rows: [order] } = await pool.query(
-      `SELECT * FROM orders WHERE payment_id=$1 AND status='pending'`, [orderId]);
+    // PERBAIKAN UTAMA: Cari order dengan payment_id ATAU external_order_id
+    const { rows: [order] } = await pool.query(`
+      SELECT * FROM orders 
+      WHERE (payment_id = $1 OR external_order_id = $1) 
+        AND status = 'pending'
+      LIMIT 1
+    `, [orderId]);
 
     if (!order) {
       console.log('Pakasir webhook: order not found or already processed:', orderId);
-      return res.json({ status: 'not found or already processed' });
+      return res.json({ status: 'not found or already processed', order_id: orderId });
     }
 
-    // Verifikasi amount jika ada (keamanan dasar)
-    if (amount && parseInt(order.amount) !== parseInt(amount)) {
-      console.warn('Pakasir webhook: amount mismatch — order:', order.amount, '| webhook:', amount);
-      // Tidak reject, hanya log — karena Pakasir kadang kirim total_payment (sudah + fee)
-    }
+    console.log(`Pakasir webhook: order ${orderId} found (ID: ${order.id}) → marking as paid`);
 
-    // Verifikasi project slug
-    if (project) {
-      const { rows: [tenant] } = await pool.query(
-        `SELECT pakasir_project_slug FROM tenants WHERE id=$1`, [order.tenant_id]);
-      if (tenant?.pakasir_project_slug && tenant.pakasir_project_slug !== project) {
-        console.warn('Pakasir webhook: project mismatch — expected:', tenant.pakasir_project_slug, '| got:', project);
-        return res.status(400).json({ error: 'Project mismatch' });
-      }
-    }
-
-    // Tandai order paid
+    // Update status menjadi paid
     await pool.query(
-      `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, [order.id]);
+      `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, 
+      [order.id]
+    );
 
-    console.log('Pakasir webhook: order', orderId, 'marked paid — delivering', order.qty, 'item(s)');
+    console.log('Pakasir webhook: order', orderId, 'marked paid — delivering', order.qty || 1, 'item(s)');
 
-    // Hapus pesan QR code jika ada
+    // Hapus pesan QRIS lama jika ada
     if (order.chat_id && order.message_id) {
       try {
         const { getBotByTenantId } = require('../../bot/tenantManager');
         const bot = getBotByTenantId(order.tenant_id);
         if (bot) {
           await bot.telegram.deleteMessage(order.chat_id, order.message_id).catch(() => {});
-          // Kirim pesan loading dulu
-          await bot.telegram.sendMessage(
-            order.chat_id,
-            `✅ *Pembayaran Diterima!*
-
-📨 Mengirim produk...`,
-            { parse_mode: 'Markdown' }
-          );
         }
       } catch (e) {
-        console.error('Webhook: gagal hapus pesan QR:', e.message);
+        console.error('Webhook: gagal hapus pesan QRIS:', e.message);
       }
     }
 
-    // Kirim produk
+    // Kirim stok / akun ke user
+    const { assignStockAndDeliver } = require('../../services/stockService');
     for (let i = 0; i < (order.qty || 1); i++) {
       await assignStockAndDeliver(order, order.tenant_id);
     }
+
+    console.log(`✅ Pakasir webhook success: order ${order.id} processed`);
 
     res.json({ status: 'ok' });
 
   } catch (err) {
     console.error('Pakasir webhook error:', err);
-    res.status(500).json({ error: 'Failed' });
+    res.status(500).json({ error: 'Failed', message: err.message });
   }
 });
 
