@@ -6,11 +6,18 @@ export default function MonitorPage() {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // 🔥 ambil tenant dari localStorage (atau hardcode dulu)
+  const tenantId =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('tenant_id') || 1
+      : 1;
+
   async function fetchData() {
     try {
       const API = process.env.NEXT_PUBLIC_API_URL;
 
-      const res = await fetch(`${API}/monitor/stocks`);
+      // ✅ pakai tenant
+      const res = await fetch(`${API}/monitor/stocks/${tenantId}`);
       const json = await res.json();
 
       setData(json);
@@ -25,7 +32,7 @@ export default function MonitorPage() {
     fetchData();
     const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [tenantId]);
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen">

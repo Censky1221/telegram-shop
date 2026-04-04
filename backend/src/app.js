@@ -28,8 +28,10 @@ app.use('/api/super',    superRouter);
 // ✅ TAMBAH MONITOR DI SINI (INI YANG PENTING)
 const { pool } = require('./db/pool');
 
-app.get('/monitor/stocks', async (req, res) => {
+app.get('/monitor/stocks/:tenantId', async (req, res) => {
   try {
+    const tenantId = req.params.tenantId;
+
     const { rows } = await pool.query(`
       SELECT  
         s.order_id,
@@ -38,10 +40,11 @@ app.get('/monitor/stocks', async (req, res) => {
       FROM stocks s
       JOIN orders o ON o.id = s.order_id
       WHERE s.order_id IS NOT NULL
+        AND o.tenant_id = $1
       GROUP BY s.order_id, o.qty
       ORDER BY s.order_id DESC
       LIMIT 20
-    `);
+    `, [tenantId]);
 
     res.json(rows);
   } catch (err) {
