@@ -563,7 +563,14 @@ bot.action(/^pay_qris_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
     try {
       const qrBuffer = await QRCode.toBuffer(result.payment_number, { type: 'png', width: 512, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
       await ctx.deleteMessage().catch(() => {});
-      await ctx.replyWithPhoto({ source: qrBuffer }, { caption, parse_mode: 'Markdown', ...keyboard });
+      const sentMsg = await ctx.replyWithPhoto({ source: qrBuffer }, { caption, parse_mode: 'Markdown', ...keyboard });
+  // Simpan chat_id & message_id agar QR bisa dihapus saat webhook masuk
+      if (sentMsg?.message_id) {
+       await pool.query(
+         `UPDATE orders SET chat_id=$1, message_id=$2 WHERE id=$3`,
+         [sentMsg.chat.id, sentMsg.message_id, newOrder.id]
+        );
+      }
     } catch (e) {
       await ctx.reply(caption + `\n\n📋 *Kode QRIS:*\n\`${result.payment_number}\``, { parse_mode: 'Markdown', ...keyboard });
     }
