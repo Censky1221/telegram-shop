@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 
 const navItems = [
   { href: '/dashboard/statistik', label: '📊 Statistik' },
+  { href: '/dashboard/monitor',   label: '📡 Monitoring' },
   { href: '/dashboard/products',  label: '📦 Products' },
   { href: '/dashboard/variants',  label: '🎛️ Varian' },
   { href: '/dashboard/stocks',    label: '🗄️ Stocks' },
