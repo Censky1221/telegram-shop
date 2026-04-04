@@ -1,33 +1,42 @@
 const { pool } = require('../db/pool');
 
-// Ambil semua stok untuk 1 order sekaligus (qty > 1 = 1 pesan)
 async function assignStockAndDeliver(order, tenantId) {
-  const tid = tenantId || order.tenant_id;
-  const qty = order.qty || 1;
+  const client = await pool.connect();
 
-  // 🔒 LOCK ORDER (ANTI DOUBLE EXECUTE)
-  const lockClient = await pool.connect();
   try {
-    await lockClient.query('BEGIN');
+    await client.query('BEGIN');
 
-    const { rows: [lockedOrder] } = await lockClient.query(
-      `SELECT status FROM orders WHERE id=$1 FOR UPDATE`,
+    // 🔥 LOCK ORDER (ANTI DOUBLE)
+    const { rows: [locked] } = await client.query(
+      `SELECT * FROM orders WHERE id=$1 FOR UPDATE`,
       [order.id]
     );
 
-    if (!lockedOrder || lockedOrder.status === 'paid') {
-      await lockClient.query('ROLLBACK');
-      console.log(`Order #${order.id} already processed`);
-      return { success: false, reason: 'already_paid' };
+    if (!locked) {
+      await client.query('ROLLBACK');
+      return { success: false };
     }
 
-    await lockClient.query('COMMIT');
+    // ❌ kalau sudah diproses → STOP
+    if (locked.status === 'paid') {
+      console.log(`Order #${order.id} already processed`);
+      await client.query('ROLLBACK');
+      return { success: true };
+    }
+
+    // 🔥 LANJUT KE PROSES ASLI
+    const tid = tenantId || order.tenant_id;
+    const qty = order.qty || 1;
+
+    await client.query('COMMIT');
   } catch (err) {
-    await lockClient.query('ROLLBACK');
+    await client.query('ROLLBACK');
     throw err;
   } finally {
-    lockClient.release();
+    client.release();
   }
+
+  // ⛔ SISANYA BIARIN SEPERTI KODE LU SEKARANG
 
   // Ambil info produk/varian sekali
   const { rows: [info] } = await pool.query(
