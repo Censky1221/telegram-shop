@@ -190,10 +190,10 @@ router.get('/stocks/:productId', authMiddleware, async (req, res) => {
   try {
     let query, params;
     if (variantId) {
-      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
+      query  = `SELECT id, email, password, content, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
       params = [variantId, req.admin.tenant_id];
     } else {
-      query  = `SELECT id, email, password, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
+      query  = `SELECT id, email, password, content, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
       params = [req.params.productId, req.admin.tenant_id];
     }
     const { rows } = await pool.query(query, params);
@@ -207,40 +207,74 @@ router.post('/stocks/upload', authMiddleware, async (req, res) => {
   const { product_id, variant_id, stocks } = req.body;
   if (!product_id || !Array.isArray(stocks) || !stocks.length)
     return res.status(400).json({ error: 'product_id and stocks required' });
-  const valid = stocks.filter(s => s.email && s.password);
-  if (!valid.length) return res.status(400).json({ error: 'No valid entries found' });
+
+  const bundleItems = stocks.filter(s => s.content);
+  const normalItems = stocks.filter(s => s.email && s.password);
+
+  if (!bundleItems.length && !normalItems.length)
+    return res.status(400).json({ error: 'No valid entries found' });
+
   try {
-    let result;
-    if (variant_id) {
-      const values = valid.map((_, i) =>
-        `($1, $2, $${i * 2 + 3}, $${i * 2 + 4}, 'available', $${valid.length * 2 + 3})`
-      ).join(', ');
-      const params = [product_id, variant_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
-      result = await pool.query(
-        `INSERT INTO stocks (product_id, variant_id, email, password, status, tenant_id) VALUES ${values}`, params
+    let inserted = 0;
+
+    // Insert bundle items
+    for (const item of bundleItems) {
+      await pool.query(
+        `INSERT INTO stocks (product_id, variant_id, content, email, password, status, tenant_id)
+         VALUES ($1, $2, $3, NULL, NULL, 'available', $4)`,
+        [product_id, variant_id || null, item.content, req.admin.tenant_id]
       );
-    } else {
-      const values = valid.map((_, i) =>
-        `($1, $${i * 2 + 2}, $${i * 2 + 3}, 'available', $${valid.length * 2 + 2})`
-      ).join(', ');
-      const params = [product_id, ...valid.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
-      result = await pool.query(
-        `INSERT INTO stocks (product_id, email, password, status, tenant_id) VALUES ${values}`, params
-      );
+      inserted++;
     }
-    res.json({ inserted: result.rowCount });
+
+    // Insert normal items
+    if (normalItems.length > 0) {
+      if (variant_id) {
+        const values = normalItems.map((_, i) =>
+          `($1, $2, $${i * 2 + 3}, $${i * 2 + 4}, 'available', $${normalItems.length * 2 + 3})`
+        ).join(', ');
+        const params = [product_id, variant_id, ...normalItems.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+        const result = await pool.query(
+          `INSERT INTO stocks (product_id, variant_id, email, password, status, tenant_id) VALUES ${values}`, params
+        );
+        inserted += result.rowCount;
+      } else {
+        const values = normalItems.map((_, i) =>
+          `($1, $${i * 2 + 2}, $${i * 2 + 3}, 'available', $${normalItems.length * 2 + 2})`
+        ).join(', ');
+        const params = [product_id, ...normalItems.flatMap(s => [s.email, s.password]), req.admin.tenant_id];
+        const result = await pool.query(
+          `INSERT INTO stocks (product_id, email, password, status, tenant_id) VALUES ${values}`, params
+        );
+        inserted += result.rowCount;
+      }
+    }
+
+    res.json({ inserted });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 router.put('/stocks/:id', authMiddleware, async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, content } = req.body;
   try {
-    const { rows: [s] } = await pool.query(
-      `UPDATE stocks SET email=$1, password=$2 WHERE id=$3 AND tenant_id=$4 RETURNING *`,
-      [email, password, req.params.id, req.admin.tenant_id]
-    );
+    let s;
+    if (content) {
+      const { rows: [row] } = await pool.query(
+        `UPDATE stocks SET content=$1, email=NULL, password=NULL
+         WHERE id=$2 AND tenant_id=$3 RETURNING *`,
+        [content, req.params.id, req.admin.tenant_id]
+      );
+      s = row;
+    } else {
+      const { rows: [row] } = await pool.query(
+        `UPDATE stocks SET email=$1, password=$2, content=NULL
+         WHERE id=$3 AND tenant_id=$4 RETURNING *`,
+        [email, password, req.params.id, req.admin.tenant_id]
+      );
+      s = row;
+    }
     if (!s) return res.status(404).json({ error: 'Stock not found' });
     res.json(s);
   } catch (err) {
@@ -405,21 +439,13 @@ router.get('/stats', authMiddleware, async (req, res) => {
   const tid = req.admin.tenant_id;
   try {
     const [revToday, revWeek, revMonth, ordersPaid, ordersPending, usersTotal, usersNewWeek, topProducts, dailyChart] = await Promise.all([
-      // Pendapatan hari ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= CURRENT_DATE`, [tid]),
-      // Pendapatan minggu ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('week', NOW())`, [tid]),
-      // Pendapatan bulan ini
       pool.query(`SELECT COALESCE(SUM(amount),0) AS total FROM orders WHERE tenant_id=$1 AND status='paid' AND paid_at >= date_trunc('month', NOW())`, [tid]),
-      // Total paid
       pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='paid'`, [tid]),
-      // Total pending
       pool.query(`SELECT COUNT(*) AS cnt FROM orders WHERE tenant_id=$1 AND status='pending'`, [tid]),
-      // Total user
       pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1`, [tid]),
-      // User baru 7 hari
       pool.query(`SELECT COUNT(*) AS cnt FROM users WHERE tenant_id=$1 AND created_at >= NOW() - INTERVAL '7 days'`, [tid]),
-      // Top produk/varian
       pool.query(`
         SELECT p.name AS product_name, pv.name AS variant_name,
                COALESCE(SUM(o.qty),0) AS total_sold,
@@ -430,7 +456,6 @@ router.get('/stats', authMiddleware, async (req, res) => {
         WHERE o.tenant_id=$1 AND o.status='paid'
         GROUP BY p.name, pv.name
         ORDER BY total_sold DESC LIMIT 10`, [tid]),
-      // Grafik 14 hari
       pool.query(`
         SELECT DATE(paid_at) AS date, COUNT(*) AS count, COALESCE(SUM(amount),0) AS total
         FROM orders WHERE tenant_id=$1 AND status='paid'
@@ -439,15 +464,15 @@ router.get('/stats', authMiddleware, async (req, res) => {
     ]);
 
     res.json({
-      revenue_today   : revToday.rows[0].total,
-      revenue_week    : revWeek.rows[0].total,
-      revenue_month   : revMonth.rows[0].total,
-      orders_paid     : ordersPaid.rows[0].cnt,
-      orders_pending  : ordersPending.rows[0].cnt,
-      users_total     : usersTotal.rows[0].cnt,
-      users_new_week  : usersNewWeek.rows[0].cnt,
-      top_products    : topProducts.rows,
-      daily_chart     : dailyChart.rows,
+      revenue_today  : revToday.rows[0].total,
+      revenue_week   : revWeek.rows[0].total,
+      revenue_month  : revMonth.rows[0].total,
+      orders_paid    : ordersPaid.rows[0].cnt,
+      orders_pending : ordersPending.rows[0].cnt,
+      users_total    : usersTotal.rows[0].cnt,
+      users_new_week : usersNewWeek.rows[0].cnt,
+      top_products   : topProducts.rows,
+      daily_chart    : dailyChart.rows,
     });
   } catch (err) {
     console.error('stats error:', err);
@@ -486,12 +511,12 @@ router.put('/vouchers/:id', authMiddleware, async (req, res) => {
   try {
     const fields = [], values = [];
     let idx = 1;
-    if (code        !== undefined) { fields.push(`code=$${idx++}`);         values.push(code?.toUpperCase()); }
-    if (type        !== undefined) { fields.push(`type=$${idx++}`);         values.push(type); }
-    if (value       !== undefined) { fields.push(`value=$${idx++}`);        values.push(value); }
-    if (max_per_user!== undefined) { fields.push(`max_per_user=$${idx++}`); values.push(max_per_user); }
-    if (expired_at  !== undefined) { fields.push(`expired_at=$${idx++}`);   values.push(expired_at || null); }
-    if (is_active   !== undefined) { fields.push(`is_active=$${idx++}`);    values.push(is_active); }
+    if (code         !== undefined) { fields.push(`code=$${idx++}`);         values.push(code?.toUpperCase()); }
+    if (type         !== undefined) { fields.push(`type=$${idx++}`);         values.push(type); }
+    if (value        !== undefined) { fields.push(`value=$${idx++}`);        values.push(value); }
+    if (max_per_user !== undefined) { fields.push(`max_per_user=$${idx++}`); values.push(max_per_user); }
+    if (expired_at   !== undefined) { fields.push(`expired_at=$${idx++}`);   values.push(expired_at || null); }
+    if (is_active    !== undefined) { fields.push(`is_active=$${idx++}`);    values.push(is_active); }
     if (!fields.length) return res.status(400).json({ error: 'No fields' });
     values.push(req.params.id, req.admin.tenant_id);
     const { rows: [v] } = await pool.query(
@@ -509,7 +534,6 @@ router.delete('/vouchers/:id', authMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
-// Validasi voucher dari bot
 router.post('/vouchers/validate', authMiddleware, async (req, res) => {
   const { code, user_id, amount } = req.body;
   try {
