@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 export default function MonitorPage() {
   const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   async function fetchData() {
     try {
@@ -11,9 +12,12 @@ export default function MonitorPage() {
 
       const res = await fetch(`${API}/monitor/stocks`);
       const json = await res.json();
+
       setData(json);
     } catch (e) {
-      console.error(e);
+      console.error('FETCH ERROR:', e);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -26,6 +30,14 @@ export default function MonitorPage() {
   return (
     <div className="p-6 bg-gray-50 min-h-screen">
       <h1 className="text-2xl font-bold mb-6">📊 Stock Monitoring</h1>
+
+      {loading && (
+        <p className="text-gray-500">Loading...</p>
+      )}
+
+      {!loading && data.length === 0 && (
+        <p className="text-gray-500">Belum ada data monitoring.</p>
+      )}
 
       <div className="grid gap-4">
         {data.map((item) => {
@@ -55,7 +67,7 @@ export default function MonitorPage() {
 
               {isError && (
                 <p className="mt-2 text-red-600 text-sm">
-                  ⚠️ Stock lebih dari qty (BUG)
+                  ⚠️ Over stock (bug terdeteksi)
                 </p>
               )}
             </div>
