@@ -552,6 +552,11 @@ bot.action(/^pay_qris_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
       await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
     }
 
+    // ✅ TAMBAHKAN INI — notif admin order baru via QRIS
+    const fakeOrder = { id: newOrder.id, user_id: user.id };
+    const info = await getOrderInfo(newOrder.id).catch(() => null);
+    if (info) await notifyAdminOrder(fakeOrder, info.product_name, info.variant_name, info.username, qty, total);
+
     const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${product.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\nScan QRIS di bawah ini.\n⏰ Berlaku 15 menit.`;
 
     const keyboard = Markup.inlineKeyboard([

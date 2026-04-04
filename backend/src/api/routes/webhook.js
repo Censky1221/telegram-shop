@@ -129,11 +129,51 @@ router.post('/pakasir', express.json(), async (req, res) => {
     }
 
     // Kirim produk
-    for (let i = 0; i < (order.qty || 1); i++) {
-      await assignStockAndDeliver(order, order.tenant_id);
-    }
+for (let i = 0; i < (order.qty || 1); i++) {
+  await assignStockAndDeliver(order, order.tenant_id);
+}
 
-    res.json({ status: 'ok' });
+// ✅ TAMBAHKAN INI — notif admin setelah webhook Pakasir
+try {
+  const { getBotByTenantId } = require('../../bot/tenantManager');
+  const bot = getBotByTenantId(order.tenant_id);
+  if (bot) {
+    const { rows: [t] } = await pool.query(
+      `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [order.tenant_id]
+    );
+    if (t?.admin_telegram_id) {
+      const { rows: [info] } = await pool.query(
+        `SELECT p.name AS product_name, pv.name AS variant_name, u.username
+         FROM orders o 
+         JOIN products p ON p.id=o.product_id
+         LEFT JOIN product_variants pv ON pv.id=o.variant_id
+         JOIN users u ON u.id=o.user_id 
+         WHERE o.id=$1`, [order.id]
+      );
+      if (info) {
+        const prodLabel = info.variant_name 
+          ? `${info.product_name} - ${info.variant_name}` 
+          : info.product_name;
+        const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
+        await bot.telegram.sendMessage(
+          t.admin_telegram_id,
+          `🛒 *Order Baru!*\n\n` +
+          `🧾 ID: *#${order.id}*\n` +
+          `📦 Produk: *${prodLabel}*\n` +
+          `👤 User: ${userLabel}\n` +
+          `🛍 Qty: *${order.qty}*\n` +
+          `💰 Total: *Rp ${Number(order.amount).toLocaleString('id-ID')}*\n` +
+          `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
+  }
+} catch (e) {
+  console.warn('Webhook: notif admin error:', e.message);
+}
+
+res.json({ status: 'ok' });
 
   } catch (err) {
     console.error('Pakasir webhook error:', err);
