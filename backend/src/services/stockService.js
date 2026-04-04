@@ -24,47 +24,33 @@ async function assignStockAndDeliver(order, tenantId) {
       return { success: true };
     }
 
-    // 🔥 LANJUT KE PROSES ASLI
     const tid = tenantId || order.tenant_id;
     const qty = order.qty || 1;
 
-    await client.query('COMMIT');
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
+    // Ambil info produk/varian sekali
+    const { rows: [info] } = await client.query(
+      `SELECT u.telegram_id,
+              p.name AS product_name,
+              p.terms AS product_terms,
+              pv.name AS variant_name,
+              pv.terms AS variant_terms
+       FROM users u
+       JOIN orders o ON o.user_id = u.id
+       JOIN products p ON p.id = o.product_id
+       LEFT JOIN product_variants pv ON pv.id = o.variant_id
+       WHERE o.id = $1`,
+      [order.id]
+    );
 
-  // ⛔ SISANYA BIARIN SEPERTI KODE LU SEKARANG
+    if (!info) {
+      await client.query('ROLLBACK');
+      console.error(`No info found for order #${order.id}`);
+      return { success: false, reason: 'no_info' };
+    }
 
-  // Ambil info produk/varian sekali
-  const { rows: [info] } = await pool.query(
-    `SELECT u.telegram_id,
-            p.name AS product_name,
-            p.terms AS product_terms,
-            pv.name AS variant_name,
-            pv.terms AS variant_terms
-     FROM users u
-     JOIN orders o ON o.user_id = u.id
-     JOIN products p ON p.id = o.product_id
-     LEFT JOIN product_variants pv ON pv.id = o.variant_id
-     WHERE o.id = $1`,
-    [order.id]
-  );
+    const stocks = [];
 
-  if (!info) {
-    console.error(`No info found for order #${order.id}`);
-    return { success: false, reason: 'no_info' };
-  }
-
-  const stocks = [];
-
-  for (let i = 0; i < qty; i++) {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
+    for (let i = 0; i < qty; i++) {
       const stockQuery = order.variant_id
         ? `SELECT id, email, password FROM stocks
            WHERE variant_id=$1 AND status='available' AND tenant_id=$2
@@ -80,7 +66,6 @@ async function assignStockAndDeliver(order, tenantId) {
       const { rows: [stock] } = await client.query(stockQuery, stockParam);
 
       if (!stock) {
-        await client.query('ROLLBACK');
         console.error(`OUT OF STOCK at item ${i + 1}: Order #${order.id}`);
         if (i === 0) await notifyAdminOutOfStock(order, tid);
         break;
@@ -91,40 +76,42 @@ async function assignStockAndDeliver(order, tenantId) {
         [order.id, stock.id]
       );
 
-      await client.query('COMMIT');
-
       stocks.push(stock);
-    } catch (err) {
-      await client.query('ROLLBACK');
-      console.error('assignStockAndDeliver error:', err);
-      throw err;
-    } finally {
-      client.release();
     }
+
+    if (stocks.length === 0) {
+      await client.query('ROLLBACK');
+      return { success: false, reason: 'out_of_stock' };
+    }
+
+    // ✅ update order SEKALI
+    await client.query(
+      `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`,
+      [order.id]
+    );
+
+    await client.query('COMMIT');
+
+    // 🚀 kirim akun setelah commit
+    await deliverAllCredentials(
+      info.telegram_id,
+      info.product_name,
+      info.variant_name,
+      info.variant_terms || info.product_terms,
+      stocks,
+      order.id,
+      tid
+    );
+
+    return { success: true };
+
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('assignStockAndDeliver error:', err);
+    throw err;
+  } finally {
+    client.release();
   }
-
-  if (stocks.length === 0) {
-    return { success: false, reason: 'out_of_stock' };
-  }
-
-  // ✅ UPDATE ORDER SEKALI SAJA (FIX UTAMA)
-  await pool.query(
-    `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`,
-    [order.id]
-  );
-
-  // Kirim 1 pesan dengan semua akun
-  await deliverAllCredentials(
-    info.telegram_id,
-    info.product_name,
-    info.variant_name,
-    info.variant_terms || info.product_terms,
-    stocks,
-    order.id,
-    tid
-  );
-
-  return { success: true };
 }
 
 async function deliverAllCredentials(telegramId, productName, variantName, termsText, stocks, orderId, tenantId) {
