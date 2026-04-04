@@ -1,5 +1,6 @@
 const { pool } = require('../db/pool');
 
+// Ambil semua stok untuk 1 order sekaligus (qty > 1 = 1 pesan)
 async function assignStockAndDeliver(order, tenantId) {
   const client = await pool.connect();
 
@@ -50,6 +51,7 @@ async function assignStockAndDeliver(order, tenantId) {
 
     const stocks = [];
 
+    // 🔁 Ambil stok sesuai qty
     for (let i = 0; i < qty; i++) {
       const stockQuery = order.variant_id
         ? `SELECT id, email, password FROM stocks
@@ -71,6 +73,7 @@ async function assignStockAndDeliver(order, tenantId) {
         break;
       }
 
+      // Update stok jadi sold
       await client.query(
         `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
         [order.id, stock.id]
@@ -84,7 +87,7 @@ async function assignStockAndDeliver(order, tenantId) {
       return { success: false, reason: 'out_of_stock' };
     }
 
-    // ✅ update order SEKALI
+    // ✅ update order sekali saja
     await client.query(
       `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`,
       [order.id]
@@ -92,7 +95,7 @@ async function assignStockAndDeliver(order, tenantId) {
 
     await client.query('COMMIT');
 
-    // 🚀 kirim akun setelah commit
+    // 🚀 Kirim akun setelah transaksi selesai
     await deliverAllCredentials(
       info.telegram_id,
       info.product_name,
@@ -114,16 +117,24 @@ async function assignStockAndDeliver(order, tenantId) {
   }
 }
 
+// 🔽 Kirim semua akun dalam 1 pesan
 async function deliverAllCredentials(telegramId, productName, variantName, termsText, stocks, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
+
   if (!bot) {
     console.error(`Bot not found for tenant #${tenantId}`);
     return;
   }
 
-  const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-  const terms = termsText || `⚠️ *Penting:*\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini`;
+  const prodLabel = variantName
+    ? `${productName} - ${variantName}`
+    : productName;
+
+  const terms = termsText || `⚠️ *Penting:*
+• Ganti password setelah login pertama
+• Simpan pesan ini dengan aman
+• Kami tidak dapat mengirim ulang kredensial ini`;
 
   const akunList = stocks.map((s, i) =>
     `*Akun ${stocks.length > 1 ? i + 1 : ''}*\n` +
@@ -143,9 +154,12 @@ async function deliverAllCredentials(telegramId, productName, variantName, terms
     `${terms}\n\n` +
     `Terima kasih telah berbelanja! 🙏`;
 
-  await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+  await bot.telegram.sendMessage(telegramId, message, {
+    parse_mode: 'Markdown'
+  });
 }
 
+// 🔔 Notif admin kalau stok habis
 async function notifyAdminOutOfStock(order, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
@@ -156,7 +170,11 @@ async function notifyAdminOutOfStock(order, tenantId) {
 
   await bot.telegram.sendMessage(
     adminId,
-    `⚠️ *STOK HABIS!*\n\nOrder #${order.id} telah dibayar tapi stok habis!\nProduct ID: ${order.product_id}\nVariant ID: ${order.variant_id || '-'}\n\nTambah stok segera.`,
+    `⚠️ *STOK HABIS!*\n\n` +
+    `Order #${order.id} telah dibayar tapi stok habis!\n` +
+    `Product ID: ${order.product_id}\n` +
+    `Variant ID: ${order.variant_id || '-'}\n\n` +
+    `Tambah stok segera.`,
     { parse_mode: 'Markdown' }
   );
 }
