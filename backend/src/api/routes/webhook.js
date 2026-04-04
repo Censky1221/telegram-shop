@@ -75,9 +75,12 @@ router.post('/pakasir', express.json(), async (req, res) => {
       return res.json({ status: 'ignored', received_status: status });
     }
 
-    // Cari order
+    // Cari order DAN langsung update status secara atomic
+    // Ini mencegah duplikat webhook memproses order 2x
     const { rows: [order] } = await pool.query(
-      `SELECT * FROM orders WHERE payment_id=$1 AND status='pending'`, [orderId]);
+      `UPDATE orders SET status='paid', paid_at=NOW()
+       WHERE payment_id=$1 AND status='pending'
+       RETURNING *`, [orderId]);
 
     if (!order) {
       console.log('Pakasir webhook: order not found or already processed:', orderId);
@@ -96,13 +99,11 @@ router.post('/pakasir', express.json(), async (req, res) => {
         `SELECT pakasir_project_slug FROM tenants WHERE id=$1`, [order.tenant_id]);
       if (tenant?.pakasir_project_slug && tenant.pakasir_project_slug !== project) {
         console.warn('Pakasir webhook: project mismatch — expected:', tenant.pakasir_project_slug, '| got:', project);
+        // Rollback status
+        await pool.query(`UPDATE orders SET status='pending', paid_at=NULL WHERE id=$1`, [order.id]);
         return res.status(400).json({ error: 'Project mismatch' });
       }
     }
-
-    // Tandai order paid
-    await pool.query(
-      `UPDATE orders SET status='paid', paid_at=NOW() WHERE id=$1`, [order.id]);
 
     console.log('Pakasir webhook: order', orderId, 'marked paid — delivering', order.qty, 'item(s)');
 
