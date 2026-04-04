@@ -527,14 +527,19 @@ bot.action(/^pay_qris_p_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
 
     const { createPayment } = require('../services/paymentService');
 
-    const result = await createPayment({
-      gateway: 'pakasir',
-      api_key: tenantConfig.pakasir_api_key,
-      project_slug: tenantConfig.pakasir_project_slug,
-      orderId: paymentOrderId,
-      amount: total,
-      productName: `${product.name} x${qty}`
-    });
+    const result = await createPayment(
+      {
+       gateway: 'pakasir',
+       api_key: tenantConfig.pakasir_api_key,
+       project_slug: tenantConfig.pakasir_project_slug,
+      },
+      {
+       orderId: paymentOrderId,
+       amount: total,
+       productName: `${product.name} x${qty}`,
+       customerName: ctx.from.first_name || 'Customer',
+      }
+    );
 
     const diskonInfo = discount > 0 ? `\n🎟️ Diskon: *-Rp ${Number(discount).toLocaleString('id-ID')}*` : '';
 
