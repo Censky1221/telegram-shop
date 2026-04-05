@@ -28,7 +28,8 @@ router.post('/tripay', express.raw({ type: '*/*' }), async (req, res) => {
     const expected = crypto.createHmac('sha256', tenant.tripay_private_key).update(rawBody).digest('hex');
     if (received !== expected) return res.status(400).json({ error: 'Invalid signature' });
 
-    for (let i = 0; i < (order.qty || 1); i++) await assignStockAndDeliver(order, order.tenant_id);
+    // Cukup 1x — stockService sudah handle qty di dalamnya
+    await assignStockAndDeliver(order, order.tenant_id);
     res.json({ status: 'ok' });
 
   } catch (err) {
@@ -58,8 +59,7 @@ router.post('/pakasir', express.json(), async (req, res) => {
     }
 
     // ── IDEMPOTENCY CHECK ─────────────────────────────────────
-    // Insert ke tabel webhook_processed — jika sudah ada (duplicate), langsung skip
-    // Ini 100% aman di multi-instance karena PRIMARY KEY constraint di DB level
+    // INSERT ke tabel idempotency — jika sudah ada, skip (PRIMARY KEY constraint)
     try {
       const { rowCount } = await pool.query(
         `INSERT INTO webhook_processed (payment_id) VALUES ($1)
@@ -67,15 +67,15 @@ router.post('/pakasir', express.json(), async (req, res) => {
         [orderId]
       );
       if (rowCount === 0) {
-        console.log('Pakasir webhook: DUPLICATE — already processed:', orderId);
-        return; // Skip, sudah pernah diproses
+        console.log('Pakasir webhook: DUPLICATE — skipping:', orderId);
+        return;
       }
     } catch (err) {
-      console.error('Pakasir webhook: idempotency check error:', err.message);
+      console.error('Pakasir webhook: idempotency error:', err.message);
       return;
     }
 
-    // ── PROSES ORDER ──────────────────────────────────────────
+    // ── UPDATE ORDER ──────────────────────────────────────────
     const { rows: [order] } = await pool.query(
       `UPDATE orders SET status='paid', paid_at=NOW()
        WHERE payment_id=$1 AND status='pending'
@@ -87,9 +87,9 @@ router.post('/pakasir', express.json(), async (req, res) => {
       return;
     }
 
-    console.log('Pakasir webhook: order', orderId, '(#' + order.id + ') marked paid — delivering', order.qty, 'item(s)');
+    console.log('Pakasir webhook: order', orderId, '(#' + order.id + ') marked paid — delivering qty:', order.qty);
 
-    // Hapus pesan QR dan kirim notif pembayaran diterima
+    // ── HAPUS PESAN QR ────────────────────────────────────────
     if (order.chat_id && order.message_id) {
       try {
         const { getBotByTenantId } = require('../../bot/tenantManager');
@@ -107,12 +107,10 @@ router.post('/pakasir', express.json(), async (req, res) => {
       }
     }
 
-    // Kirim produk
-    for (let i = 0; i < (order.qty || 1); i++) {
-      await assignStockAndDeliver(order, order.tenant_id);
-    }
+    // ── KIRIM PRODUK — cukup 1x, stockService handle qty ─────
+    await assignStockAndDeliver(order, order.tenant_id);
 
-    // Notif admin
+    // ── NOTIF ADMIN ───────────────────────────────────────────
     try {
       const { getBotByTenantId } = require('../../bot/tenantManager');
       const bot = getBotByTenantId(order.tenant_id);

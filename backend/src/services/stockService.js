@@ -4,6 +4,16 @@ async function assignStockAndDeliver(order, tenantId) {
   const tid = tenantId || order.tenant_id;
   const qty = order.qty || 1;
 
+  // Cek apakah order sudah pernah di-deliver (anti double deliver)
+  const { rows: [delivered] } = await pool.query(
+    `SELECT COUNT(*) AS cnt FROM stocks WHERE order_id=$1 AND status='sold'`,
+    [order.id]
+  );
+  if (parseInt(delivered.cnt) >= qty) {
+    console.log(`assignStockAndDeliver: order #${order.id} already delivered (${delivered.cnt} stocks), skipping`);
+    return { success: true, reason: 'already_delivered' };
+  }
+
   const { rows: [info] } = await pool.query(
     `SELECT u.telegram_id,
             p.name AS product_name,
@@ -23,7 +33,7 @@ async function assignStockAndDeliver(order, tenantId) {
     return { success: false, reason: 'no_info' };
   }
 
-  // Cek dulu: apakah stok pertama yang tersedia adalah bundle (punya content)?
+  // Cek apakah stok pertama yang tersedia adalah bundle (punya content)?
   const stockCheckQuery = order.variant_id
     ? `SELECT content FROM stocks
        WHERE variant_id=$1 AND status='available' AND tenant_id=$2
