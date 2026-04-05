@@ -220,7 +220,7 @@ async function notifyAdminOutOfStock(order, tenantId) {
   const { rows: [t] } = await pool.query(
     `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
   );
-  const adminId = t?.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID;
+  const adminId = t?.admin_telegram_id;
   if (!adminId) return;
 
   await bot.telegram.sendMessage(
