@@ -39,21 +39,16 @@ router.post('/tripay', express.raw({ type: '*/*' }), async (req, res) => {
 
 // ── Pakasir webhook ──────────────────────────────────────────
 router.post('/pakasir', express.json(), async (req, res) => {
-  // Langsung reply 200 ke Pakasir agar tidak retry
+  // Langsung reply 200 agar Pakasir tidak retry
   res.json({ status: 'received' });
 
   try {
-    console.log('=== Pakasir webhook received ===');
-    console.log('Body:', JSON.stringify(req.body));
-    console.log('================================');
-
     const body    = req.body;
     const orderId = body.order_id || body.merchant_ref || body.reference || body.id;
     const status  = body.status   || body.payment_status || body.transaction_status;
-    const amount  = body.amount   || body.total_payment  || body.received;
     const project = body.project  || body.project_slug;
 
-    console.log('Pakasir parsed - order_id:', orderId, '| status:', status);
+    console.log('Pakasir webhook - order_id:', orderId, '| status:', status);
 
     if (!orderId) return console.warn('Pakasir webhook: missing order_id');
 
@@ -62,112 +57,101 @@ router.post('/pakasir', express.json(), async (req, res) => {
       return console.log('Pakasir webhook: status not paid:', status, '— ignored');
     }
 
-    // Gunakan database transaction + advisory lock untuk cegah race condition
-    const client = await pool.connect();
+    // ── IDEMPOTENCY CHECK ─────────────────────────────────────
+    // Insert ke tabel webhook_processed — jika sudah ada (duplicate), langsung skip
+    // Ini 100% aman di multi-instance karena PRIMARY KEY constraint di DB level
     try {
-      await client.query('BEGIN');
-
-      // Advisory lock berdasarkan hash dari order_id — hanya 1 proses yang bisa masuk
-      await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [orderId]);
-
-      // Cek dan update status secara atomic dalam 1 transaksi
-      const { rows: [order] } = await client.query(
-        `UPDATE orders SET status='paid', paid_at=NOW()
-         WHERE payment_id=$1 AND status='pending'
-         RETURNING *`, [orderId]
+      const { rowCount } = await pool.query(
+        `INSERT INTO webhook_processed (payment_id) VALUES ($1)
+         ON CONFLICT (payment_id) DO NOTHING`,
+        [orderId]
       );
-
-      if (!order) {
-        await client.query('ROLLBACK');
-        return console.log('Pakasir webhook: order not found or already processed:', orderId);
+      if (rowCount === 0) {
+        console.log('Pakasir webhook: DUPLICATE — already processed:', orderId);
+        return; // Skip, sudah pernah diproses
       }
+    } catch (err) {
+      console.error('Pakasir webhook: idempotency check error:', err.message);
+      return;
+    }
 
-      // Verifikasi project slug
-      if (project) {
-        const { rows: [tenant] } = await client.query(
-          `SELECT pakasir_project_slug FROM tenants WHERE id=$1`, [order.tenant_id]);
-        if (tenant?.pakasir_project_slug && tenant.pakasir_project_slug !== project) {
-          console.warn('Pakasir webhook: project mismatch');
-          await client.query(`UPDATE orders SET status='pending', paid_at=NULL WHERE id=$1`, [order.id]);
-          await client.query('ROLLBACK');
-          return;
-        }
-      }
+    // ── PROSES ORDER ──────────────────────────────────────────
+    const { rows: [order] } = await pool.query(
+      `UPDATE orders SET status='paid', paid_at=NOW()
+       WHERE payment_id=$1 AND status='pending'
+       RETURNING *`, [orderId]
+    );
 
-      await client.query('COMMIT');
+    if (!order) {
+      console.log('Pakasir webhook: order not found or already paid:', orderId);
+      return;
+    }
 
-      console.log('Pakasir webhook: order', orderId, 'marked paid — delivering', order.qty, 'item(s)');
+    console.log('Pakasir webhook: order', orderId, '(#' + order.id + ') marked paid — delivering', order.qty, 'item(s)');
 
-      // Hapus pesan QR dan kirim notif
-      if (order.chat_id && order.message_id) {
-        try {
-          const { getBotByTenantId } = require('../../bot/tenantManager');
-          const bot = getBotByTenantId(order.tenant_id);
-          if (bot) {
-            await bot.telegram.deleteMessage(order.chat_id, order.message_id).catch(() => {});
-            await bot.telegram.sendMessage(
-              order.chat_id,
-              `✅ *Pembayaran Diterima!*\n\n📨 Mengirim produk...`,
-              { parse_mode: 'Markdown' }
-            );
-          }
-        } catch (e) {
-          console.error('Webhook: gagal hapus pesan QR:', e.message);
-        }
-      }
-
-      // Kirim produk
-      for (let i = 0; i < (order.qty || 1); i++) {
-        await assignStockAndDeliver(order, order.tenant_id);
-      }
-
-      // Notif admin
+    // Hapus pesan QR dan kirim notif pembayaran diterima
+    if (order.chat_id && order.message_id) {
       try {
         const { getBotByTenantId } = require('../../bot/tenantManager');
         const bot = getBotByTenantId(order.tenant_id);
         if (bot) {
-          const { rows: [t] } = await pool.query(
-            `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [order.tenant_id]);
-          if (t?.admin_telegram_id) {
-            const { rows: [info] } = await pool.query(
-              `SELECT p.name AS product_name, pv.name AS variant_name, u.username
-               FROM orders o
-               JOIN products p ON p.id=o.product_id
-               LEFT JOIN product_variants pv ON pv.id=o.variant_id
-               JOIN users u ON u.id=o.user_id
-               WHERE o.id=$1`, [order.id]);
-            if (info) {
-              const prodLabel = info.variant_name
-                ? `${info.product_name} - ${info.variant_name}`
-                : info.product_name;
-              const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
-              await bot.telegram.sendMessage(
-                t.admin_telegram_id,
-                `🛒 *Order Baru!*\n\n` +
-                `🧾 ID: *#${order.id}*\n` +
-                `📦 Produk: *${prodLabel}*\n` +
-                `👤 User: ${userLabel}\n` +
-                `🛍 Qty: *${order.qty}*\n` +
-                `💰 Total: *Rp ${Number(order.amount).toLocaleString('id-ID')}*\n` +
-                `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
-                { parse_mode: 'Markdown' }
-              );
-            }
-          }
+          await bot.telegram.deleteMessage(order.chat_id, order.message_id).catch(() => {});
+          await bot.telegram.sendMessage(
+            order.chat_id,
+            `✅ *Pembayaran Diterima!*\n\n📨 Mengirim produk...`,
+            { parse_mode: 'Markdown' }
+          );
         }
       } catch (e) {
-        console.warn('Webhook: notif admin error:', e.message);
+        console.error('Webhook: gagal hapus pesan QR:', e.message);
       }
+    }
 
-    } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
-      console.error('Pakasir webhook processing error:', err);
-    } finally {
-      client.release();
+    // Kirim produk
+    for (let i = 0; i < (order.qty || 1); i++) {
+      await assignStockAndDeliver(order, order.tenant_id);
+    }
+
+    // Notif admin
+    try {
+      const { getBotByTenantId } = require('../../bot/tenantManager');
+      const bot = getBotByTenantId(order.tenant_id);
+      if (bot) {
+        const { rows: [t] } = await pool.query(
+          `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [order.tenant_id]);
+        if (t?.admin_telegram_id) {
+          const { rows: [info] } = await pool.query(
+            `SELECT p.name AS product_name, pv.name AS variant_name, u.username
+             FROM orders o
+             JOIN products p ON p.id=o.product_id
+             LEFT JOIN product_variants pv ON pv.id=o.variant_id
+             JOIN users u ON u.id=o.user_id
+             WHERE o.id=$1`, [order.id]);
+          if (info) {
+            const prodLabel = info.variant_name
+              ? `${info.product_name} - ${info.variant_name}`
+              : info.product_name;
+            const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
+            await bot.telegram.sendMessage(
+              t.admin_telegram_id,
+              `🛒 *Order Baru!*\n\n` +
+              `🧾 ID: *#${order.id}*\n` +
+              `📦 Produk: *${prodLabel}*\n` +
+              `👤 User: ${userLabel}\n` +
+              `🛍 Qty: *${order.qty}*\n` +
+              `💰 Total: *Rp ${Number(order.amount).toLocaleString('id-ID')}*\n` +
+              `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
+              { parse_mode: 'Markdown' }
+            );
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Webhook: notif admin error:', e.message);
     }
 
   } catch (err) {
-    console.error('Pakasir webhook outer error:', err);
+    console.error('Pakasir webhook error:', err);
   }
 });
 
