@@ -133,7 +133,7 @@ for (let i = 0; i < (order.qty || 1); i++) {
   await assignStockAndDeliver(order, order.tenant_id);
 }
 
-// ✅ TAMBAHKAN INI — notif admin setelah webhook Pakasir
+// Notif admin — 1x saja
 try {
   const { getBotByTenantId } = require('../../bot/tenantManager');
   const bot = getBotByTenantId(order.tenant_id);
@@ -151,8 +151,8 @@ try {
          WHERE o.id=$1`, [order.id]
       );
       if (info) {
-        const prodLabel = info.variant_name 
-          ? `${info.product_name} - ${info.variant_name}` 
+        const prodLabel = info.variant_name
+          ? `${info.product_name} - ${info.variant_name}`
           : info.product_name;
         const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
         await bot.telegram.sendMessage(
