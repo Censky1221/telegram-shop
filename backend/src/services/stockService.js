@@ -27,7 +27,6 @@ async function assignStockAndDeliver(order, tenantId) {
      WHERE o.id = $1`,
     [order.id]
   );
-
   if (!info) {
     console.error(`No info found for order #${order.id}`);
     return { success: false, reason: 'no_info' };
@@ -41,13 +40,10 @@ async function assignStockAndDeliver(order, tenantId) {
     : `SELECT content FROM stocks
        WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
        ORDER BY id ASC LIMIT 1`;
-
   const stockCheckParam = order.variant_id
     ? [order.variant_id, tid]
     : [order.product_id, tid];
-
   const { rows: [firstStock] } = await pool.query(stockCheckQuery, stockCheckParam);
-
   if (!firstStock) {
     console.error(`OUT OF STOCK: Order #${order.id}`);
     await notifyAdminOutOfStock(order, tid);
@@ -55,13 +51,11 @@ async function assignStockAndDeliver(order, tenantId) {
   }
 
   const isBundle = !!firstStock.content;
-
   if (isBundle) {
     // ── Mode Bundle: ambil 1 row, kirim content langsung ──────────
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-
       const stockQuery = order.variant_id
         ? `SELECT id, content FROM stocks
            WHERE variant_id=$1 AND status='available' AND tenant_id=$2
@@ -69,15 +63,12 @@ async function assignStockAndDeliver(order, tenantId) {
         : `SELECT id, content FROM stocks
            WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
            ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
-
       const { rows: [stock] } = await client.query(stockQuery, stockCheckParam);
-
       if (!stock) {
         await client.query('ROLLBACK');
         await notifyAdminOutOfStock(order, tid);
         return { success: false, reason: 'out_of_stock' };
       }
-
       await client.query(
         `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
         [order.id, stock.id]
@@ -87,7 +78,6 @@ async function assignStockAndDeliver(order, tenantId) {
         [stock.id, order.id]
       );
       await client.query('COMMIT');
-
       await deliverBundle(
         info.telegram_id,
         info.product_name,
@@ -98,6 +88,8 @@ async function assignStockAndDeliver(order, tenantId) {
         tid
       );
 
+      // 🔥 NOTIF ADMIN HANYA 1x (dipindah ke sini)
+      await notifyAdminNewOrder(order, tid);
       return { success: true };
     } catch (err) {
       await client.query('ROLLBACK');
@@ -106,16 +98,13 @@ async function assignStockAndDeliver(order, tenantId) {
     } finally {
       client.release();
     }
-
   } else {
     // ── Mode Normal: ambil sejumlah qty, kirim semua akun ─────────
     const stocks = [];
-
     for (let i = 0; i < qty; i++) {
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-
         const stockQuery = order.variant_id
           ? `SELECT id, email, password FROM stocks
              WHERE variant_id=$1 AND status='available' AND tenant_id=$2
@@ -123,16 +112,13 @@ async function assignStockAndDeliver(order, tenantId) {
           : `SELECT id, email, password FROM stocks
              WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
              ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
-
         const { rows: [stock] } = await client.query(stockQuery, stockCheckParam);
-
         if (!stock) {
           await client.query('ROLLBACK');
           console.error(`OUT OF STOCK at item ${i + 1}: Order #${order.id}`);
           if (i === 0) await notifyAdminOutOfStock(order, tid);
           break;
         }
-
         await client.query(
           `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
           [order.id, stock.id]
@@ -142,7 +128,6 @@ async function assignStockAndDeliver(order, tenantId) {
           [stock.id, order.id]
         );
         await client.query('COMMIT');
-
         stocks.push(stock);
       } catch (err) {
         await client.query('ROLLBACK');
@@ -152,11 +137,9 @@ async function assignStockAndDeliver(order, tenantId) {
         client.release();
       }
     }
-
     if (stocks.length === 0) {
       return { success: false, reason: 'out_of_stock' };
     }
-
     await deliverAllCredentials(
       info.telegram_id,
       info.product_name,
@@ -167,18 +150,17 @@ async function assignStockAndDeliver(order, tenantId) {
       tid
     );
 
+    // 🔥 NOTIF ADMIN HANYA 1x (dipindah ke sini)
+    await notifyAdminNewOrder(order, tid);
     return { success: true };
   }
 }
 
-// Kirim bundle (1 stok berisi banyak akun dalam 1 teks)
+// ── Kirim bundle (1 stok berisi banyak akun dalam 1 teks) ─────────────
 async function deliverBundle(telegramId, productName, variantName, termsText, content, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
-  if (!bot) {
-    console.error(`Bot not found for tenant #${tenantId}`);
-    return;
-  }
+  if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
   const terms = termsText ||
@@ -198,14 +180,11 @@ async function deliverBundle(telegramId, productName, variantName, termsText, co
   await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
 }
 
-// Kirim normal (beberapa akun email:password)
+// ── Kirim normal (beberapa akun email:password) ───────────────────────
 async function deliverAllCredentials(telegramId, productName, variantName, termsText, stocks, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
-  if (!bot) {
-    console.error(`Bot not found for tenant #${tenantId}`);
-    return;
-  }
+  if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
   const terms = termsText ||
@@ -213,7 +192,7 @@ async function deliverAllCredentials(telegramId, productName, variantName, terms
 
   const akunList = stocks.map((s, i) =>
     `*Akun ${stocks.length > 1 ? i + 1 : ''}*\n` +
-    `📧 Email   : \`${s.email}\`\n` +
+    `📧 Email : \`${s.email}\`\n` +
     `🔐 Password: \`${s.password}\``
   ).join('\n─────────────────\n');
 
@@ -232,18 +211,61 @@ async function deliverAllCredentials(telegramId, productName, variantName, terms
   await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
 }
 
+// ── NOTIF ADMIN STOK HABIS ────────────────────────────────────────────
 async function notifyAdminOutOfStock(order, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
   if (!bot) return;
+
   const { rows: [t] } = await pool.query(
     `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
   );
   const adminId = t?.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID;
   if (!adminId) return;
+
   await bot.telegram.sendMessage(
     adminId,
     `⚠️ *STOK HABIS!*\n\nOrder #${order.id} telah dibayar tapi stok habis!\nProduct ID: ${order.product_id}\nVariant ID: ${order.variant_id || '-'}\n\nTambah stok segera.`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+// ── NOTIF ADMIN "Order Baru!" (HANYA 1x) ──────────────────────────────
+async function notifyAdminNewOrder(order, tenantId) {
+  const { getBotByTenantId } = require('../bot/tenantManager');
+  const bot = getBotByTenantId(tenantId);
+  if (!bot) return;
+
+  const { rows: [t] } = await pool.query(
+    `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
+  );
+  const adminId = t?.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID;
+  if (!adminId) return;
+
+  const { rows: [info] } = await pool.query(
+    `SELECT p.name AS product_name, pv.name AS variant_name, u.username
+     FROM orders o
+     JOIN products p ON p.id=o.product_id
+     LEFT JOIN product_variants pv ON pv.id=o.variant_id
+     JOIN users u ON u.id=o.user_id
+     WHERE o.id=$1`, [order.id]);
+
+  if (!info) return;
+
+  const prodLabel = info.variant_name
+    ? `${info.product_name} - ${info.variant_name}`
+    : info.product_name;
+  const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
+
+  await bot.telegram.sendMessage(
+    adminId,
+    `🛒 *Order Baru!*\n\n` +
+    `🧾 ID: *#${order.id}*\n` +
+    `📦 Produk: *${prodLabel}*\n` +
+    `👤 User: ${userLabel}\n` +
+    `🛍 Qty: *${order.qty}*\n` +
+    `💰 Total: *Rp ${Number(order.amount).toLocaleString('id-ID')}*\n` +
+    `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
     { parse_mode: 'Markdown' }
   );
 }
