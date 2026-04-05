@@ -17,37 +17,6 @@ const MAIN_KEYBOARD = Markup.keyboard([
 module.exports = function registerHandlers(bot, tenant) {
   const tenantId = tenant.id;
 
-  // ── Notif admin ───────────────────────────────────────────
-  async function notifyAdminOrder(order, productName, variantName, username, qty, total) {
-    try {
-      const { rows: [t] } = await pool.query(`SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]);
-      if (!t?.admin_telegram_id) return;
-      const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-      const userLabel = username ? `@${username}` : `ID: ${order.user_id}`;
-      await bot.telegram.sendMessage(
-        t.admin_telegram_id,
-        `🛒 *Order Baru!*\n\n` +
-        `🧾 ID: *#${order.id}*\n` +
-        `📦 Produk: *${prodLabel}*\n` +
-        `👤 User: ${userLabel}\n` +
-        `🛍 Qty: *${qty}*\n` +
-        `💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n` +
-        `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (err) { console.warn('notif admin error:', err.message); }
-  }
-
-  async function getOrderInfo(orderId) {
-    const { rows: [info] } = await pool.query(
-      `SELECT p.name AS product_name, pv.name AS variant_name, u.username
-       FROM orders o JOIN products p ON p.id=o.product_id
-       LEFT JOIN product_variants pv ON pv.id=o.variant_id
-       JOIN users u ON u.id=o.user_id WHERE o.id=$1`, [orderId]
-    );
-    return info;
-  }
-
   // ── /start ────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const telegramId = ctx.from.id.toString();
@@ -475,9 +444,6 @@ module.exports = function registerHandlers(bot, tenant) {
         const { rows: [newOrder] } = await pool.query(`INSERT INTO orders (user_id, product_id, variant_id, payment_id, payment_url, amount, status, qty, tenant_id) VALUES ($1,$2,$3,$4,$5,$6,'pending',$7,$8) RETURNING id`, [user.id, variant.product_id, variantId, paymentOrderId, result.payment_number, total, qty, tenantId]);
         if (voucherId > 0) await pool.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, newOrder.id]);
         // Notif admin order baru
-        const fakeOrder = { id: newOrder.id, user_id: user.id, qty, amount: total };
-        const info = await getOrderInfo(newOrder.id).catch(() => null);
-        if (info) await notifyAdminOrder(fakeOrder, info.product_name, info.variant_name, info.username, qty, total);
         const expiredText = result.expired_at ? `⏰ Expired: *${new Date(result.expired_at).toLocaleString('id-ID')}*` : `⏰ Berlaku *15 menit*`;
         const caption = `🧾 *Pesanan Dibuat!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}${diskonInfo}\n💰 Total: *Rp ${Number(result.total_payment||total).toLocaleString('id-ID')}*\n${expiredText}\n\n📲 *Cara Bayar QRIS:*\n1. Buka e-wallet (GoPay, OVO, Dana, dll)\n2. Scan gambar QR di atas\n3. Atau pilih *Salin Kode* jika tidak bisa scan`;
         const keyboard = Markup.inlineKeyboard([[Markup.button.callback('📋 Salin Kode QRIS',`copy_qris_${newOrder.id}`)],[Markup.button.callback('❌ Batal','cancel_buy')]]);
@@ -668,8 +634,6 @@ bot.action(/^check_pakasir_(\d+)$/, async (ctx) => {
       WHERE id=$1
     `, [orderId]);
 
-    const info = await getOrderInfo(order.id);
-    if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, order.qty, order.amount);
 
   } catch (err) {
     console.error('check_pakasir error:', err);
