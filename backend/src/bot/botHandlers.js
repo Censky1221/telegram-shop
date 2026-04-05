@@ -357,8 +357,6 @@ module.exports = function registerHandlers(bot, tenant) {
       if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
-      const info = await getOrderInfo(order.id);
-      if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
       const { assignStockAndDeliver } = require('../services/stockService');
       await assignStockAndDeliver(order, tenantId);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_v error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
@@ -408,8 +406,6 @@ module.exports = function registerHandlers(bot, tenant) {
       if (voucherId > 0) await client.query(`INSERT INTO voucher_usage (voucher_id, user_id, order_id) VALUES ($1,$2,$3)`, [voucherId, user.id, order.id]);
       await client.query('COMMIT');
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
-      const info = await getOrderInfo(order.id);
-      if (info) await notifyAdminOrder(order, info.product_name, info.variant_name, info.username, qty, total);
       const { assignStockAndDeliver } = require('../services/stockService');
       await assignStockAndDeliver(order, tenantId);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_p error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
