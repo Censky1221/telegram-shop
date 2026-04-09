@@ -53,6 +53,53 @@ router.post('/pakasir', express.json(), async (req, res) => {
 
     if (!orderId) return console.warn('Pakasir webhook: missing order_id');
 
+    const statusLower = String(status || '').toLowerCase();
+
+// ── HANDLE EXPIRED ─────────────────────────────
+if (['expired', 'failed', 'cancelled'].includes(statusLower)) {
+  console.log('Pakasir webhook: EXPIRED detected:', orderId);
+
+  const { rows: [order] } = await pool.query(
+    `SELECT * FROM orders WHERE payment_id=$1`,
+    [orderId]
+  );
+
+  if (order && order.chat_id && order.message_id) {
+    try {
+      const { getBotByTenantId } = require('../../bot/tenantManager');
+      const bot = getBotByTenantId(order.tenant_id);
+
+      if (bot) {
+        // EDIT QR jadi expired (lebih bagus dari delete)
+        await bot.telegram.editMessageCaption(
+          order.chat_id,
+          order.message_id,
+          null,
+          '❌ *Pesanan Expired*\n\nSilakan buat pesanan baru.',
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+
+        // Hapus tombol
+        await bot.telegram.editMessageReplyMarkup(
+          order.chat_id,
+          order.message_id,
+          null,
+          { inline_keyboard: [] }
+        ).catch(() => {});
+      }
+    } catch (e) {
+      console.error('Webhook expired error:', e.message);
+    }
+  }
+
+  await pool.query(
+    `UPDATE orders SET status='expired' WHERE payment_id=$1`,
+    [orderId]
+  );
+
+  return;
+}
+
     const PAID_STATUSES = ['completed', 'paid', 'success', 'PAID', 'SUCCESS', 'settlement', 'capture'];
     if (!PAID_STATUSES.includes(status)) {
       return console.log('Pakasir webhook: status not paid:', status, '— ignored');
