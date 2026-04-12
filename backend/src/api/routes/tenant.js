@@ -7,6 +7,7 @@ const { startTenantBot, stopTenantBot, restartTenantBot } = require('../../bot/t
 function superAuth(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.role !== 'super') return res.status(403).json({ error: 'Forbidden' });
@@ -17,34 +18,72 @@ function superAuth(req, res, next) {
   }
 }
 
-// GET /api/tenant
+// ==============================
+// GET /api/tenant (FIXED)
+// ==============================
 router.get('/', superAuth, async (req, res) => {
-  const { rows } = await pool.query(
-    `SELECT t.id, t.name, t.bot_token, t.status, t.plan, t.expired_at, t.created_at,
-            t.tripay_merchant_code, t.tripay_mode, t.payment_gateway,
-            t.pakasir_project_slug,
-            CASE WHEN t.tripay_api_key IS NOT NULL THEN LEFT(t.tripay_api_key, 10) || '•••' ELSE NULL END AS tripay_api_key_preview,
-            CASE WHEN t.tripay_private_key IS NOT NULL THEN LEFT(t.tripay_private_key, 8) || '•••' ELSE NULL END AS tripay_private_key_preview,
-            COUNT(DISTINCT u.id) AS total_users,
-            COUNT(DISTINCT o.id) AS total_orders,
-            COUNT(DISTINCT p.id) AS total_products
-     FROM tenants t
-     LEFT JOIN users u ON u.tenant_id = t.id
-     LEFT JOIN orders o ON o.tenant_id = t.id
-     LEFT JOIN products p ON p.tenant_id = t.id
-     GROUP BY t.id ORDER BY t.created_at DESC`
-  );
-  res.json(rows);
+  try {
+    // Ambil tenant (ringan)
+    const { rows: tenants } = await pool.query(`
+      SELECT 
+        t.id, 
+        t.name, 
+        t.bot_token, 
+        t.status, 
+        t.plan, 
+        t.expired_at, 
+        t.created_at,
+        t.tripay_merchant_code, 
+        t.tripay_mode, 
+        t.payment_gateway,
+        t.pakasir_project_slug,
+        CASE 
+          WHEN t.tripay_api_key IS NOT NULL 
+          THEN LEFT(t.tripay_api_key, 10) || '•••' 
+          ELSE NULL 
+        END AS tripay_api_key_preview,
+        CASE 
+          WHEN t.tripay_private_key IS NOT NULL 
+          THEN LEFT(t.tripay_private_key, 8) || '•••' 
+          ELSE NULL 
+        END AS tripay_private_key_preview
+      FROM tenants t
+      ORDER BY t.created_at DESC
+    `);
+
+    // Hitung stats paralel (AMAN)
+    await Promise.all(tenants.map(async (tenant) => {
+      const [u, o, p] = await Promise.all([
+        pool.query(`SELECT COUNT(*) FROM users WHERE tenant_id=$1`, [tenant.id]),
+        pool.query(`SELECT COUNT(*) FROM orders WHERE tenant_id=$1`, [tenant.id]),
+        pool.query(`SELECT COUNT(*) FROM products WHERE tenant_id=$1`, [tenant.id])
+      ]);
+
+      tenant.total_users = Number(u.rows[0].count);
+      tenant.total_orders = Number(o.rows[0].count);
+      tenant.total_products = Number(p.rows[0].count);
+    }));
+
+    res.json(tenants);
+  } catch (err) {
+    console.error('get tenants error:', err);
+    res.status(500).json({ error: 'Gagal ambil tenant' });
+  }
 });
 
+// ==============================
 // POST /api/tenant
+// ==============================
 router.post('/', superAuth, async (req, res) => {
   const {
     name, bot_token, plan, expired_at,
     tripay_api_key, tripay_private_key, tripay_merchant_code, tripay_mode,
     pakasir_api_key, pakasir_project_slug, payment_gateway,
   } = req.body;
-  if (!name || !bot_token) return res.status(400).json({ error: 'name and bot_token required' });
+
+  if (!name || !bot_token) {
+    return res.status(400).json({ error: 'name and bot_token required' });
+  }
 
   try {
     const { rows: [tenant] } = await pool.query(
@@ -54,23 +93,36 @@ router.post('/', superAuth, async (req, res) => {
         pakasir_api_key, pakasir_project_slug, payment_gateway
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
-        name, bot_token, plan || 'basic', expired_at || null,
-        tripay_api_key || null, tripay_private_key || null,
-        tripay_merchant_code || null, tripay_mode || 'sandbox',
-        pakasir_api_key || null, pakasir_project_slug || null,
+        name,
+        bot_token,
+        plan || 'basic',
+        expired_at || null,
+        tripay_api_key || null,
+        tripay_private_key || null,
+        tripay_merchant_code || null,
+        tripay_mode || 'sandbox',
+        pakasir_api_key || null,
+        pakasir_project_slug || null,
         payment_gateway || 'tripay',
       ]
     );
+
     await startTenantBot(tenant);
+
     res.status(201).json(tenant);
   } catch (err) {
-    if (err.code === '23505') return res.status(409).json({ error: 'Bot token sudah digunakan' });
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Bot token sudah digunakan' });
+    }
+
     console.error('create tenant error:', err);
     res.status(500).json({ error: 'Failed to create tenant' });
   }
 });
 
+// ==============================
 // PUT /api/tenant/:id
+// ==============================
 router.put('/:id', superAuth, async (req, res) => {
   const {
     name, bot_token, status, plan, expired_at,
@@ -79,17 +131,34 @@ router.put('/:id', superAuth, async (req, res) => {
   } = req.body;
 
   try {
-    const { rows: [old] } = await pool.query('SELECT * FROM tenants WHERE id=$1', [req.params.id]);
+    const { rows: [old] } = await pool.query(
+      'SELECT * FROM tenants WHERE id=$1',
+      [req.params.id]
+    );
+
     if (!old) return res.status(404).json({ error: 'Tenant not found' });
 
     const { rows: [tenant] } = await pool.query(
       `UPDATE tenants SET
-        name=$1, bot_token=$2, status=$3, plan=$4, expired_at=$5,
-        tripay_api_key=$6, tripay_private_key=$7, tripay_merchant_code=$8, tripay_mode=$9,
-        pakasir_api_key=$10, pakasir_project_slug=$11, payment_gateway=$12
-       WHERE id=$13 RETURNING *`,
+        name=$1,
+        bot_token=$2,
+        status=$3,
+        plan=$4,
+        expired_at=$5,
+        tripay_api_key=$6,
+        tripay_private_key=$7,
+        tripay_merchant_code=$8,
+        tripay_mode=$9,
+        pakasir_api_key=$10,
+        pakasir_project_slug=$11,
+        payment_gateway=$12
+      WHERE id=$13 RETURNING *`,
       [
-        name, bot_token, status || old.status, plan, expired_at || null,
+        name,
+        bot_token,
+        status || old.status,
+        plan,
+        expired_at || null,
         tripay_api_key     || old.tripay_api_key,
         tripay_private_key || old.tripay_private_key,
         tripay_merchant_code || old.tripay_merchant_code,
@@ -100,7 +169,9 @@ router.put('/:id', superAuth, async (req, res) => {
         req.params.id,
       ]
     );
+
     await restartTenantBot(tenant.id);
+
     res.json(tenant);
   } catch (err) {
     console.error('update tenant error:', err);
@@ -108,27 +179,56 @@ router.put('/:id', superAuth, async (req, res) => {
   }
 });
 
+// ==============================
 // DELETE /api/tenant/:id
+// ==============================
 router.delete('/:id', superAuth, async (req, res) => {
-  await stopTenantBot(parseInt(req.params.id));
-  await pool.query('DELETE FROM tenants WHERE id=$1', [req.params.id]);
-  res.json({ message: 'Tenant deleted' });
+  try {
+    await stopTenantBot(parseInt(req.params.id));
+    await pool.query('DELETE FROM tenants WHERE id=$1', [req.params.id]);
+    res.json({ message: 'Tenant deleted' });
+  } catch (err) {
+    console.error('delete tenant error:', err);
+    res.status(500).json({ error: 'Failed to delete tenant' });
+  }
 });
 
+// ==============================
 // POST /api/tenant/:id/suspend
+// ==============================
 router.post('/:id/suspend', superAuth, async (req, res) => {
-  await pool.query(`UPDATE tenants SET status='suspended' WHERE id=$1`, [req.params.id]);
-  await stopTenantBot(parseInt(req.params.id));
-  res.json({ message: 'Tenant suspended' });
+  try {
+    await pool.query(
+      `UPDATE tenants SET status='suspended' WHERE id=$1`,
+      [req.params.id]
+    );
+
+    await stopTenantBot(parseInt(req.params.id));
+
+    res.json({ message: 'Tenant suspended' });
+  } catch (err) {
+    console.error('suspend tenant error:', err);
+    res.status(500).json({ error: 'Failed to suspend tenant' });
+  }
 });
 
+// ==============================
 // POST /api/tenant/:id/activate
+// ==============================
 router.post('/:id/activate', superAuth, async (req, res) => {
-  const { rows: [tenant] } = await pool.query(
-    `UPDATE tenants SET status='active' WHERE id=$1 RETURNING *`, [req.params.id]
-  );
-  await startTenantBot(tenant);
-  res.json({ message: 'Tenant activated', tenant });
+  try {
+    const { rows: [tenant] } = await pool.query(
+      `UPDATE tenants SET status='active' WHERE id=$1 RETURNING *`,
+      [req.params.id]
+    );
+
+    await startTenantBot(tenant);
+
+    res.json({ message: 'Tenant activated', tenant });
+  } catch (err) {
+    console.error('activate tenant error:', err);
+    res.status(500).json({ error: 'Failed to activate tenant' });
+  }
 });
 
 module.exports = router;
