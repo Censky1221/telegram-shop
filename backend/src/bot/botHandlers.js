@@ -857,50 +857,6 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   }
 });
 
-   const { pool } = require('../db/pool');
-
-// HANDLE VOTE
-bot.action(/vote_(\d+)_(\d+)/, async (ctx) => {
-  try {
-    const pollId = ctx.match[1];
-    const optionIndex = ctx.match[2];
-    const telegramId = ctx.from.id;
-
-    // ambil user + tenant
-    const { rows: [user] } = await pool.query(
-      `SELECT id, tenant_id FROM users WHERE telegram_id=$1`,
-      [telegramId]
-    );
-
-    if (!user) {
-      return ctx.answerCbQuery('User tidak ditemukan');
-    }
-
-    // cek sudah vote
-    const { rows: [exists] } = await pool.query(
-      `SELECT * FROM poll_votes WHERE poll_id=$1 AND user_id=$2`,
-      [pollId, user.id]
-    );
-
-    if (exists) {
-      return ctx.answerCbQuery('❌ Kamu sudah vote');
-    }
-
-    // simpan vote
-    await pool.query(
-      `INSERT INTO poll_votes (poll_id, user_id, option_index, tenant_id)
-       VALUES ($1,$2,$3,$4)`,
-      [pollId, user.id, optionIndex, user.tenant_id]
-    );
-
-    await ctx.answerCbQuery('✅ Vote berhasil');
-
-  } catch (err) {
-    console.error('VOTE ERROR:', err);
-    ctx.answerCbQuery('❌ Error');
-  }
-});
-
   // ── HELPERS ───────────────────────────────────────────────
 
   async function showLoadingThenProductList(ctx) {

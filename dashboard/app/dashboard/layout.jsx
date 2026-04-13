@@ -13,7 +13,6 @@ const navItems = [
   { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
-  { href: '/dashboard/poll', label: '📊 Polling' },
 ];
 
 export default function DashboardLayout({ children }) {

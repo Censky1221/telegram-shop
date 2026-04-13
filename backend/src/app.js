@@ -9,7 +9,7 @@ const webhookRouter  = require('./api/routes/webhook');
 const adminRouter    = require('./api/routes/admin');
 const tenantRouter   = require('./api/routes/tenant');
 const superRouter    = require('./api/routes/super');
-const pollRoutes = require('./api/routes/poll');
+
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
@@ -24,7 +24,6 @@ app.use('/api/orders',   ordersRouter);
 app.use('/api/admin',    adminRouter);
 app.use('/api/tenant',   tenantRouter);
 app.use('/api/super',    superRouter);
-app.use('/api/poll', pollRoutes);
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 
