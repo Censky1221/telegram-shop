@@ -252,12 +252,50 @@ async function notifyAdminNewOrder(order, tenantId) {
     [tenantId]
   );
 
-  if (!t?.admin_telegram_id) return;
+  const adminId = t?.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID;
+  if (!adminId) return;
 
-  await bot.telegram.sendMessage(
-    t.admin_telegram_id,
-    `🛒 Order Baru #${order.id}`
+  // ambil detail order + user
+  const { rows: [info] } = await pool.query(
+    `SELECT 
+        p.name AS product_name,
+        pv.name AS variant_name,
+        u.username,
+        o.qty,
+        o.amount
+     FROM orders o
+     JOIN products p ON p.id = o.product_id
+     LEFT JOIN product_variants pv ON pv.id = o.variant_id
+     JOIN users u ON u.id = o.user_id
+     WHERE o.id=$1`,
+    [order.id]
   );
+
+  if (!info) return;
+
+  const prodLabel = info.variant_name
+    ? `${info.product_name} - ${info.variant_name}`
+    : info.product_name;
+
+  const userLabel = info.username
+    ? `@${info.username}`
+    : `ID: ${order.user_id}`;
+
+  const waktu = new Date().toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta'
+  });
+
+  const message =
+`🛒 Order Baru!
+
+🧾 ID: #${order.id}
+📦 Produk: ${prodLabel}
+👤 User: ${userLabel}
+🛍 Qty: ${info.qty}
+💰 Total: Rp ${Number(info.amount).toLocaleString('id-ID')}
+📅 ${waktu} WIB`;
+
+  await bot.telegram.sendMessage(adminId, message);
 }
 
 module.exports = { assignStockAndDeliver };
