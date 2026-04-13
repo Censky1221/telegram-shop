@@ -1,16 +1,16 @@
 const { pool } = require('../db/pool');
+const fs = require('fs');
+const path = require('path');
 
 async function assignStockAndDeliver(order, tenantId) {
   const tid = tenantId || order.tenant_id;
   const qty = order.qty || 1;
 
-  // Cek apakah order sudah pernah di-deliver (anti double deliver)
   const { rows: [delivered] } = await pool.query(
     `SELECT COUNT(*) AS cnt FROM stocks WHERE order_id=$1 AND status='sold'`,
     [order.id]
   );
   if (parseInt(delivered.cnt) >= qty) {
-    console.log(`assignStockAndDeliver: order #${order.id} already delivered (${delivered.cnt} stocks), skipping`);
     return { success: true, reason: 'already_delivered' };
   }
 
@@ -27,191 +27,165 @@ async function assignStockAndDeliver(order, tenantId) {
      WHERE o.id = $1`,
     [order.id]
   );
-  if (!info) {
-    console.error(`No info found for order #${order.id}`);
-    return { success: false, reason: 'no_info' };
-  }
+  if (!info) return { success: false };
 
-  // Cek apakah stok pertama yang tersedia adalah bundle (punya content)?
   const stockCheckQuery = order.variant_id
-    ? `SELECT content FROM stocks
-       WHERE variant_id=$1 AND status='available' AND tenant_id=$2
-       ORDER BY id ASC LIMIT 1`
-    : `SELECT content FROM stocks
-       WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
-       ORDER BY id ASC LIMIT 1`;
+    ? `SELECT content FROM stocks WHERE variant_id=$1 AND status='available' AND tenant_id=$2 LIMIT 1`
+    : `SELECT content FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2 LIMIT 1`;
+
   const stockCheckParam = order.variant_id
     ? [order.variant_id, tid]
     : [order.product_id, tid];
+
   const { rows: [firstStock] } = await pool.query(stockCheckQuery, stockCheckParam);
   if (!firstStock) {
-    console.error(`OUT OF STOCK: Order #${order.id}`);
     await notifyAdminOutOfStock(order, tid);
-    return { success: false, reason: 'out_of_stock' };
+    return { success: false };
   }
 
   const isBundle = !!firstStock.content;
-  if (isBundle) {
-    // ── Mode Bundle: ambil 1 row, kirim content langsung ──────────
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const stockQuery = order.variant_id
-        ? `SELECT id, content FROM stocks
-           WHERE variant_id=$1 AND status='available' AND tenant_id=$2
-           ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`
-        : `SELECT id, content FROM stocks
-           WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
-           ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
-      const { rows: [stock] } = await client.query(stockQuery, stockCheckParam);
-      if (!stock) {
-        await client.query('ROLLBACK');
-        await notifyAdminOutOfStock(order, tid);
-        return { success: false, reason: 'out_of_stock' };
-      }
-      await client.query(
-        `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
-        [order.id, stock.id]
-      );
-      await client.query(
-        `UPDATE orders SET status='paid', stock_id=$1, paid_at=NOW() WHERE id=$2`,
-        [stock.id, order.id]
-      );
-      await client.query('COMMIT');
-      await deliverBundle(
-        info.telegram_id,
-        info.product_name,
-        info.variant_name,
-        info.variant_terms || info.product_terms,
-        stock.content,
-        order.id,
-        tid
-      );
 
-      // 🔥 NOTIF ADMIN HANYA 1x (dipindah ke sini)
-      await notifyAdminNewOrder(order, tid);
-      return { success: true };
-    } catch (err) {
-      await client.query('ROLLBACK');
-      console.error('assignStockAndDeliver bundle error:', err);
-      throw err;
-    } finally {
-      client.release();
-    }
-  } else {
-    // ── Mode Normal: ambil sejumlah qty, kirim semua akun ─────────
-    const stocks = [];
-    for (let i = 0; i < qty; i++) {
-      const client = await pool.connect();
-      try {
-        await client.query('BEGIN');
-        const stockQuery = order.variant_id
-          ? `SELECT id, email, password FROM stocks
-             WHERE variant_id=$1 AND status='available' AND tenant_id=$2
-             ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`
-          : `SELECT id, email, password FROM stocks
-             WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2
-             ORDER BY id ASC LIMIT 1 FOR UPDATE SKIP LOCKED`;
-        const { rows: [stock] } = await client.query(stockQuery, stockCheckParam);
-        if (!stock) {
-          await client.query('ROLLBACK');
-          console.error(`OUT OF STOCK at item ${i + 1}: Order #${order.id}`);
-          if (i === 0) await notifyAdminOutOfStock(order, tid);
-          break;
-        }
-        await client.query(
-          `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
-          [order.id, stock.id]
-        );
-        await client.query(
-          `UPDATE orders SET status='paid', stock_id=$1, paid_at=NOW() WHERE id=$2`,
-          [stock.id, order.id]
-        );
-        await client.query('COMMIT');
-        stocks.push(stock);
-      } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('assignStockAndDeliver normal error:', err);
-        throw err;
-      } finally {
-        client.release();
-      }
-    }
-    if (stocks.length === 0) {
-      return { success: false, reason: 'out_of_stock' };
-    }
-    await deliverAllCredentials(
+  if (isBundle) {
+    const { rows: [stock] } = await pool.query(
+      `SELECT id, content FROM stocks WHERE variant_id=$1 AND status='available' AND tenant_id=$2 LIMIT 1`,
+      stockCheckParam
+    );
+
+    await pool.query(`UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`, [order.id, stock.id]);
+
+    await deliverBundleFile(
       info.telegram_id,
       info.product_name,
       info.variant_name,
       info.variant_terms || info.product_terms,
-      stocks,
+      stock.content,
       order.id,
       tid
     );
 
-    // 🔥 NOTIF ADMIN HANYA 1x (dipindah ke sini)
     await notifyAdminNewOrder(order, tid);
     return { success: true };
   }
+
+  // NORMAL MODE
+  const stocks = [];
+
+  for (let i = 0; i < qty; i++) {
+    const { rows: [stock] } = await pool.query(
+      order.variant_id
+        ? `SELECT id, email, password FROM stocks WHERE variant_id=$1 AND status='available' AND tenant_id=$2 LIMIT 1`
+        : `SELECT id, email, password FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2 LIMIT 1`,
+      stockCheckParam
+    );
+
+    if (!stock) break;
+
+    await pool.query(`UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`, [order.id, stock.id]);
+    stocks.push(stock);
+  }
+
+  if (stocks.length === 0) return { success: false };
+
+  await deliverAllCredentials(
+    info.telegram_id,
+    info.product_name,
+    info.variant_name,
+    info.variant_terms || info.product_terms,
+    stocks,
+    order.id,
+    tid
+  );
+
+  await notifyAdminNewOrder(order, tid);
+  return { success: true };
 }
 
-// ── Kirim bundle (1 stok berisi banyak akun dalam 1 teks) ─────────────
-async function deliverBundle(telegramId, productName, variantName, termsText, content, orderId, tenantId) {
+// =======================
+// 🔥 BUNDLE → FILE TXT
+// =======================
+async function deliverBundleFile(telegramId, productName, variantName, termsText, content, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
   if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-  const terms = termsText ||
-    `⚠️ *Penting:*\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini`;
 
-  const message =
-    `🎉 *Pembayaran Berhasil!*\n\n` +
-    `Terima kasih atas pembelian Anda.\n\n` +
-    `📦 Produk: *${prodLabel}*\n` +
-    `🧾 ID Pesanan: *#${orderId}*\n\n` +
-    `─────────────────\n` +
-    `\`\`\`\n${content}\n\`\`\`\n` +
-    `─────────────────\n\n` +
-    `${terms}\n\n` +
-    `Terima kasih telah berbelanja! 🙏`;
+  const fileName = `order_${orderId}.txt`;
+  const filePath = path.join(__dirname, '../../temp', fileName);
 
-  await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+  await fs.promises.writeFile(filePath, content);
+
+  const caption =
+`🎉 Pembayaran Berhasil!
+
+Terima kasih atas pembelian Anda.
+
+📦 Produk: ${prodLabel}
+🧾 ID Pesanan: #${orderId}
+
+─────────────────
+
+${termsText || 'Tidak ada catatan.'}
+
+Terima kasih telah berbelanja! 🙏`;
+
+  await bot.telegram.sendDocument(telegramId, {
+    source: filePath
+  }, {
+    caption: caption
+  });
+
+  await fs.promises.unlink(filePath);
 }
 
-// ── Kirim normal (beberapa akun email:password) ───────────────────────
+// =======================
+// 🔥 NORMAL → FILE TXT
+// =======================
 async function deliverAllCredentials(telegramId, productName, variantName, termsText, stocks, orderId, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
   if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
-  const terms = termsText ||
-    `⚠️ *Penting:*\n• Ganti password setelah login pertama\n• Simpan pesan ini dengan aman\n• Kami tidak dapat mengirim ulang kredensial ini`;
 
-  const akunList = stocks.map((s, i) =>
-    `*Akun ${stocks.length > 1 ? i + 1 : ''}*\n` +
-    `📧 Email : \`${s.email}\`\n` +
-    `🔐 Password: \`${s.password}\``
-  ).join('\n─────────────────\n');
+  const fileName = `order_${orderId}.txt`;
+  const filePath = path.join(__dirname, '../../temp', fileName);
 
-  const message =
-    `🎉 *Pembayaran Berhasil!*\n\n` +
-    `Terima kasih atas pembelian Anda.\n\n` +
-    `📦 Produk: *${prodLabel}*\n` +
-    `🛒 Jumlah: *${stocks.length} akun*\n` +
-    `🧾 ID Pesanan: *#${orderId}*\n\n` +
-    `─────────────────\n` +
-    `${akunList}\n` +
-    `─────────────────\n\n` +
-    `${terms}\n\n` +
-    `Terima kasih telah berbelanja! 🙏`;
+  const akunText = stocks.map((s, i) =>
+`AKUN ${i + 1}
+Email    : ${s.email}
+Password : ${s.password}
+`).join('\n');
 
-  await bot.telegram.sendMessage(telegramId, message, { parse_mode: 'Markdown' });
+  await fs.promises.writeFile(filePath, akunText);
+
+  const caption =
+`🎉 Pembayaran Berhasil!
+
+Terima kasih atas pembelian Anda.
+
+📦 Produk: ${prodLabel}
+🛒 Jumlah: ${stocks.length} akun
+🧾 ID Pesanan: #${orderId}
+
+─────────────────
+
+${termsText || 'Tidak ada catatan.'}
+
+Terima kasih telah berbelanja! 🙏`;
+
+  await bot.telegram.sendDocument(telegramId, {
+    source: filePath
+  }, {
+    caption: caption
+  });
+
+  await fs.promises.unlink(filePath);
 }
 
-// ── NOTIF ADMIN STOK HABIS ────────────────────────────────────────────
+// =======================
+// ADMIN
+// =======================
 async function notifyAdminOutOfStock(order, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
@@ -220,17 +194,12 @@ async function notifyAdminOutOfStock(order, tenantId) {
   const { rows: [t] } = await pool.query(
     `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
   );
-  const adminId = t?.admin_telegram_id;
-  if (!adminId) return;
 
-  await bot.telegram.sendMessage(
-    adminId,
-    `⚠️ *STOK HABIS!*\n\nOrder #${order.id} telah dibayar tapi stok habis!\nProduct ID: ${order.product_id}\nVariant ID: ${order.variant_id || '-'}\n\nTambah stok segera.`,
-    { parse_mode: 'Markdown' }
-  );
+  if (!t?.admin_telegram_id) return;
+
+  await bot.telegram.sendMessage(t.admin_telegram_id, `⚠️ STOK HABIS! Order #${order.id}`);
 }
 
-// ── NOTIF ADMIN "Order Baru!" (HANYA 1x) ──────────────────────────────
 async function notifyAdminNewOrder(order, tenantId) {
   const { getBotByTenantId } = require('../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
@@ -239,35 +208,10 @@ async function notifyAdminNewOrder(order, tenantId) {
   const { rows: [t] } = await pool.query(
     `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
   );
-  const adminId = t?.admin_telegram_id || process.env.ADMIN_TELEGRAM_ID;
-  if (!adminId) return;
 
-  const { rows: [info] } = await pool.query(
-    `SELECT p.name AS product_name, pv.name AS variant_name, u.username
-     FROM orders o
-     JOIN products p ON p.id=o.product_id
-     LEFT JOIN product_variants pv ON pv.id=o.variant_id
-     JOIN users u ON u.id=o.user_id
-     WHERE o.id=$1`, [order.id]);
+  if (!t?.admin_telegram_id) return;
 
-  if (!info) return;
-
-  const prodLabel = info.variant_name
-    ? `${info.product_name} - ${info.variant_name}`
-    : info.product_name;
-  const userLabel = info.username ? `@${info.username}` : `ID: ${order.user_id}`;
-
-  await bot.telegram.sendMessage(
-    adminId,
-    `🛒 *Order Baru!*\n\n` +
-    `🧾 ID: *#${order.id}*\n` +
-    `📦 Produk: *${prodLabel}*\n` +
-    `👤 User: ${userLabel}\n` +
-    `🛍 Qty: *${order.qty}*\n` +
-    `💰 Total: *Rp ${Number(order.amount).toLocaleString('id-ID')}*\n` +
-    `📅 ${new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`,
-    { parse_mode: 'Markdown' }
-  );
+  await bot.telegram.sendMessage(t.admin_telegram_id, `🛒 Order Baru #${order.id}`);
 }
 
 module.exports = { assignStockAndDeliver };
