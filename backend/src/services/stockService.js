@@ -148,10 +148,15 @@ Terima kasih telah berbelanja! 🙏`;
     console.log("SEND BUNDLE FILE", orderId);
 
     await bot.telegram.sendDocument(
-      telegramId,
-      { source: fs.createReadStream(filePath) },
-      { caption: caption }
-    );
+  telegramId,
+  {
+    source: fs.createReadStream(filePath),
+    filename: `order_${orderId}.txt` // 🔥 INI KUNCINYA
+  },
+  {
+    caption: caption
+  }
+);
 
     console.log("SUCCESS SEND BUNDLE");
 
@@ -207,10 +212,15 @@ Terima kasih telah berbelanja! 🙏`;
     console.log("SEND FILE START", orderId);
 
     await bot.telegram.sendDocument(
-      telegramId,
-      { source: fs.createReadStream(filePath) },
-      { caption: caption }
-    );
+  telegramId,
+  {
+    source: fs.createReadStream(filePath),
+    filename: `order_${orderId}.txt` // 🔥 INI KUNCINYA
+  },
+  {
+    caption: caption
+  }
+);
 
     console.log("SEND FILE SUCCESS");
 
