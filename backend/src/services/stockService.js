@@ -10,6 +10,7 @@ async function assignStockAndDeliver(order, tenantId) {
     `SELECT COUNT(*) AS cnt FROM stocks WHERE order_id=$1 AND status='sold'`,
     [order.id]
   );
+
   if (parseInt(delivered.cnt) >= qty) {
     return { success: true, reason: 'already_delivered' };
   }
@@ -27,6 +28,7 @@ async function assignStockAndDeliver(order, tenantId) {
      WHERE o.id = $1`,
     [order.id]
   );
+
   if (!info) return { success: false };
 
   const stockCheckQuery = order.variant_id
@@ -38,6 +40,7 @@ async function assignStockAndDeliver(order, tenantId) {
     : [order.product_id, tid];
 
   const { rows: [firstStock] } = await pool.query(stockCheckQuery, stockCheckParam);
+
   if (!firstStock) {
     await notifyAdminOutOfStock(order, tid);
     return { success: false };
@@ -51,7 +54,10 @@ async function assignStockAndDeliver(order, tenantId) {
       stockCheckParam
     );
 
-    await pool.query(`UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`, [order.id, stock.id]);
+    await pool.query(
+      `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
+      [order.id, stock.id]
+    );
 
     await deliverBundleFile(
       info.telegram_id,
@@ -80,7 +86,11 @@ async function assignStockAndDeliver(order, tenantId) {
 
     if (!stock) break;
 
-    await pool.query(`UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`, [order.id, stock.id]);
+    await pool.query(
+      `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
+      [order.id, stock.id]
+    );
+
     stocks.push(stock);
   }
 
@@ -109,9 +119,14 @@ async function deliverBundleFile(telegramId, productName, variantName, termsText
   if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
+  const safeTerms = termsText ? String(termsText) : 'Tidak ada catatan.';
 
-  const fileName = `order_${orderId}.txt`;
-  const filePath = path.join(__dirname, '../../temp', fileName);
+  const tempDir = path.join(__dirname, '../../temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const filePath = path.join(tempDir, `order_${orderId}.txt`);
 
   await fs.promises.writeFile(filePath, content);
 
@@ -125,15 +140,24 @@ Terima kasih atas pembelian Anda.
 
 ─────────────────
 
-${termsText || 'Tidak ada catatan.'}
+${safeTerms}
 
 Terima kasih telah berbelanja! 🙏`;
 
-  await bot.telegram.sendDocument(telegramId, {
-    source: filePath
-  }, {
-    caption: caption
-  });
+  try {
+    console.log("SEND BUNDLE FILE", orderId);
+
+    await bot.telegram.sendDocument(
+      telegramId,
+      { source: fs.createReadStream(filePath) },
+      { caption: caption }
+    );
+
+    console.log("SUCCESS SEND BUNDLE");
+
+  } catch (err) {
+    console.error("ERROR SEND BUNDLE:", err);
+  }
 
   await fs.promises.unlink(filePath);
 }
@@ -147,9 +171,14 @@ async function deliverAllCredentials(telegramId, productName, variantName, terms
   if (!bot) return;
 
   const prodLabel = variantName ? `${productName} - ${variantName}` : productName;
+  const safeTerms = termsText ? String(termsText) : 'Tidak ada catatan.';
 
-  const fileName = `order_${orderId}.txt`;
-  const filePath = path.join(__dirname, '../../temp', fileName);
+  const tempDir = path.join(__dirname, '../../temp');
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+  }
+
+  const filePath = path.join(tempDir, `order_${orderId}.txt`);
 
   const akunText = stocks.map((s, i) =>
 `AKUN ${i + 1}
@@ -170,15 +199,24 @@ Terima kasih atas pembelian Anda.
 
 ─────────────────
 
-${termsText || 'Tidak ada catatan.'}
+${safeTerms}
 
 Terima kasih telah berbelanja! 🙏`;
 
-  await bot.telegram.sendDocument(telegramId, {
-    source: filePath
-  }, {
-    caption: caption
-  });
+  try {
+    console.log("SEND FILE START", orderId);
+
+    await bot.telegram.sendDocument(
+      telegramId,
+      { source: fs.createReadStream(filePath) },
+      { caption: caption }
+    );
+
+    console.log("SEND FILE SUCCESS");
+
+  } catch (err) {
+    console.error("SEND FILE ERROR:", err);
+  }
 
   await fs.promises.unlink(filePath);
 }
@@ -192,12 +230,16 @@ async function notifyAdminOutOfStock(order, tenantId) {
   if (!bot) return;
 
   const { rows: [t] } = await pool.query(
-    `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
+    `SELECT admin_telegram_id FROM tenants WHERE id=$1`,
+    [tenantId]
   );
 
   if (!t?.admin_telegram_id) return;
 
-  await bot.telegram.sendMessage(t.admin_telegram_id, `⚠️ STOK HABIS! Order #${order.id}`);
+  await bot.telegram.sendMessage(
+    t.admin_telegram_id,
+    `⚠️ STOK HABIS! Order #${order.id}`
+  );
 }
 
 async function notifyAdminNewOrder(order, tenantId) {
@@ -206,12 +248,16 @@ async function notifyAdminNewOrder(order, tenantId) {
   if (!bot) return;
 
   const { rows: [t] } = await pool.query(
-    `SELECT admin_telegram_id FROM tenants WHERE id=$1`, [tenantId]
+    `SELECT admin_telegram_id FROM tenants WHERE id=$1`,
+    [tenantId]
   );
 
   if (!t?.admin_telegram_id) return;
 
-  await bot.telegram.sendMessage(t.admin_telegram_id, `🛒 Order Baru #${order.id}`);
+  await bot.telegram.sendMessage(
+    t.admin_telegram_id,
+    `🛒 Order Baru #${order.id}`
+  );
 }
 
 module.exports = { assignStockAndDeliver };
