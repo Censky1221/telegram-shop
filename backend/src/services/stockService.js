@@ -151,7 +151,7 @@ Terima kasih telah berbelanja! 🙏`;
   telegramId,
   {
     source: fs.createReadStream(filePath),
-    filename: `order_${orderId}.txt` // 🔥 INI KUNCINYA
+    filename: `${productName.replace(/[^a-z0-9]/gi, '_')}_${orderId}.txt`
   },
   {
     caption: caption
@@ -215,7 +215,7 @@ Terima kasih telah berbelanja! 🙏`;
   telegramId,
   {
     source: fs.createReadStream(filePath),
-    filename: `order_${orderId}.txt` // 🔥 INI KUNCINYA
+    filename: `${productName.replace(/[^a-z0-9]/gi, '_')}_${orderId}.txt`
   },
   {
     caption: caption
