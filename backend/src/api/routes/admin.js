@@ -138,15 +138,42 @@ router.get('/variants', authMiddleware, async (req, res) => {
 
 router.post('/variants', authMiddleware, async (req, res) => {
   const { product_id, name, description, price, terms } = req.body;
-  if (!product_id || !name || price === undefined) return res.status(400).json({ error: 'product_id, name, price required' });
+
+  if (!product_id || !name || price === undefined)
+    return res.status(400).json({ error: 'product_id, name, price required' });
+
   try {
+    // 🔥 CEK apakah ini variant pertama
+    const { rows: existingVariants } = await pool.query(
+      `SELECT id FROM product_variants 
+       WHERE product_id=$1 AND tenant_id=$2`,
+      [product_id, req.admin.tenant_id]
+    );
+
+    // 🔥 INSERT VARIANT
     const { rows: [v] } = await pool.query(
       `INSERT INTO product_variants (product_id, tenant_id, name, description, price, terms)
        VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [product_id, req.admin.tenant_id, name, description || null, price, terms || null]
     );
+
+    // 🔥 JIKA INI VARIANT PERTAMA → HAPUS STOCK LAMA
+    if (existingVariants.length === 0) {
+      await pool.query(
+        `DELETE FROM stocks 
+         WHERE product_id=$1 
+         AND variant_id IS NULL 
+         AND tenant_id=$2`,
+        [product_id, req.admin.tenant_id]
+      );
+
+      console.log(`🔥 Auto clean stock lama untuk product ${product_id}`);
+    }
+
     res.json(v);
+
   } catch (err) {
+    console.error('create variant error:', err);
     res.status(500).json({ error: err.message });
   }
 });
