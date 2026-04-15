@@ -17,14 +17,24 @@ export default function UsersPage() {
   const [note, setNote]         = useState('');
   const [mode, setMode]         = useState('topup'); // topup | deduct
   const [saving, setSaving]     = useState(false);
+  const [search, setSearch] = useState('');
   const [msg, setMsg]           = useState('');
 
-  useEffect(() => { fetchUsers(); }, []);
+  useEffect(() => {
+  const delay = setTimeout(() => {
+    fetchUsers();
+  }, 300);
+
+  return () => clearTimeout(delay);
+}, [search]);
 
   async function fetchUsers() {
     setLoading(true);
     try {
-      const res = await fetch(`${API}/api/admin/users`, { headers: authHeaders() });
+      const res = await fetch(
+  `${API}/api/admin/users?search=${search}`,
+  { headers: authHeaders() }
+);
       setUsers(await res.json());
     } finally { setLoading(false); }
   }
@@ -60,6 +70,17 @@ export default function UsersPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* User list */}
         <div className="lg:col-span-2 bg-white rounded-2xl shadow overflow-hidden">
+
+  {/* 🔍 SEARCH */}
+  <div className="p-4 border-b">
+    <input
+      type="text"
+      placeholder="🔍 Cari username / nama / ID..."
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      className="w-full border rounded-lg px-3 py-2 text-sm focus:ring focus:ring-blue-200"
+    />
+  </div>
           {loading ? (
             <div className="py-16 text-center text-gray-400">Loading...</div>
           ) : (

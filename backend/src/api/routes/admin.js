@@ -362,12 +362,30 @@ router.get('/orders', authMiddleware, async (req, res) => {
 
 // ── Users & Balance ───────────────────────────────────────────────
 router.get('/users', authMiddleware, async (req, res) => {
+  const { search } = req.query;
+
   try {
-    const { rows } = await pool.query(
-      `SELECT id, telegram_id, username, first_name, balance, created_at
-       FROM users WHERE tenant_id=$1 ORDER BY created_at DESC`,
-      [req.admin.tenant_id]
-    );
+    let query = `
+      SELECT id, telegram_id, username, first_name, balance, created_at
+      FROM users
+      WHERE tenant_id=$1
+    `;
+    const params = [req.admin.tenant_id];
+
+    // 🔍 FILTER SEARCH
+    if (search) {
+      query += ` AND (
+        username ILIKE $2 OR 
+        first_name ILIKE $2 OR 
+        telegram_id::text ILIKE $2
+      )`;
+      params.push(`%${search}%`);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+
+    const { rows } = await pool.query(query, params);
+
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
