@@ -49,29 +49,48 @@ async function assignStockAndDeliver(order, tenantId) {
   const isBundle = !!firstStock.content;
 
   if (isBundle) {
-    const { rows: [stock] } = await pool.query(
-      `SELECT id, content FROM stocks WHERE variant_id=$1 AND status='available' AND tenant_id=$2 LIMIT 1`,
-      stockCheckParam
-    );
+  const { rows: stocks } = await pool.query(
+    order.variant_id
+      ? `SELECT id, content FROM stocks 
+         WHERE variant_id=$1 AND status='available' AND tenant_id=$2 
+         LIMIT $3`
+      : `SELECT id, content FROM stocks 
+         WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2 
+         LIMIT $3`,
+    [...stockCheckParam, qty]
+  );
 
-    await pool.query(
-      `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
-      [order.id, stock.id]
-    );
-
-    await deliverBundleFile(
-      info.telegram_id,
-      info.product_name,
-      info.variant_name,
-      info.variant_terms || info.product_terms,
-      stock.content,
-      order.id,
-      tid
-    );
-
-    await notifyAdminNewOrder(order, tid);
-    return { success: true };
+  if (stocks.length < qty) {
+    await notifyAdminOutOfStock(order, tid);
+    return { success: false };
   }
+
+  // 🔥 gabung semua content
+  const combinedContent = stocks.map((s, i) => {
+    return `${i + 1}. ${s.content}`;
+  }).join('\n');
+
+  // 🔥 update semua stock jadi sold
+  const ids = stocks.map(s => s.id);
+
+  await pool.query(
+    `UPDATE stocks SET status='sold', order_id=$1 WHERE id = ANY($2)`,
+    [order.id, ids]
+  );
+
+  await deliverBundleFile(
+    info.telegram_id,
+    info.product_name,
+    info.variant_name,
+    info.variant_terms || info.product_terms,
+    combinedContent,
+    order.id,
+    tid
+  );
+
+  await notifyAdminNewOrder(order, tid);
+  return { success: true };
+}
 
   // NORMAL MODE
   const stocks = [];
