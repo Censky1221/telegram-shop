@@ -873,11 +873,15 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
   async function showProductList(ctx, page, messageId = null) {
     try {
       const { rows: allProducts } = await pool.query(
-        `SELECT p.id, p.name, COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
-         FROM products p LEFT JOIN stocks s ON s.product_id=p.id
-         WHERE p.is_active=true AND p.tenant_id=$1 GROUP BY p.id ORDER BY p.id`,
-        [tenantId]
-      );
+  `SELECT p.id, p.name,
+          COUNT(s.id) FILTER (WHERE s.status='available') AS stock_count
+   FROM products p
+   LEFT JOIN stocks s ON s.product_id=p.id
+   WHERE p.is_active=true AND p.tenant_id=$1
+   GROUP BY p.id
+   ORDER BY LOWER(p.name) ASC`,
+  [tenantId]
+);
       if (!allProducts.length) return ctx.reply('Tidak ada produk tersedia saat ini.');
 
       const PAGE       = 9;
