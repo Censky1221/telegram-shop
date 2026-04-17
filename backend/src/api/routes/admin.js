@@ -66,15 +66,16 @@ router.post('/register', async (req, res) => {
 // ── Products ──────────────────────────────────────────────────────
 router.get('/products', authMiddleware, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT p.*,
-            COUNT(s.id) FILTER (WHERE s.status='available') AS available,
-            COUNT(s.id) FILTER (WHERE s.status='sold') AS sold
-     FROM products p
-     LEFT JOIN stocks s ON s.product_id = p.id
-     WHERE p.tenant_id=$1
-     GROUP BY p.id ORDER BY p.id`,
-    [req.admin.tenant_id]
-  );
+  `SELECT p.*,
+          COUNT(s.id) FILTER (WHERE s.status='available') AS available,
+          COUNT(s.id) FILTER (WHERE s.status='sold') AS sold
+   FROM products p
+   LEFT JOIN stocks s ON s.product_id = p.id
+   WHERE p.tenant_id=$1
+   GROUP BY p.id
+   ORDER BY p.name ASC`,
+  [req.admin.tenant_id]
+);
   res.json(rows);
 });
 
