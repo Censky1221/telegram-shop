@@ -173,7 +173,12 @@ Terima kasih telah berbelanja! 🙏`;
     filename: `${productName.replace(/[^a-z0-9]/gi, '_')}_${orderId}.txt`
   },
   {
-    caption: caption
+    caption: caption,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '⚠️ Laporkan Masalah', callback_data: `complain_${orderId}` }]
+      ]
+    }
   }
 );
 
@@ -237,7 +242,12 @@ Terima kasih telah berbelanja! 🙏`;
     filename: `${productName.replace(/[^a-z0-9]/gi, '_')}_${orderId}.txt`
   },
   {
-    caption: caption
+    caption: caption,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '⚠️ Laporkan Masalah', callback_data: `complain_${orderId}` }]
+      ]
+    }
   }
 );
 
@@ -327,4 +337,76 @@ async function notifyAdminNewOrder(order, tenantId) {
   await bot.telegram.sendMessage(adminId, message);
 }
 
-module.exports = { assignStockAndDeliver };
+async function replaceAccount(orderId, tenantId) {
+  const { getBotByTenantId } = require('../bot/tenantManager');
+  const bot = getBotByTenantId(tenantId);
+  if (!bot) return;
+
+  // ambil order + user
+  const { rows: [order] } = await pool.query(
+    `SELECT o.*, u.telegram_id
+     FROM orders o
+     JOIN users u ON u.id = o.user_id
+     WHERE o.id=$1`,
+    [orderId]
+  );
+
+  if (!order) return;
+
+  // ambil 1 stok baru
+  const { rows: [stock] } = await pool.query(
+    order.variant_id
+      ? `SELECT id, email, password FROM stocks 
+         WHERE variant_id=$1 AND status='available' AND tenant_id=$2 LIMIT 1`
+      : `SELECT id, email, password FROM stocks 
+         WHERE product_id=$1 AND variant_id IS NULL AND status='available' AND tenant_id=$2 LIMIT 1`,
+    order.variant_id
+      ? [order.variant_id, tenantId]
+      : [order.product_id, tenantId]
+  );
+
+  if (!stock) {
+    await bot.telegram.sendMessage(
+      order.telegram_id,
+      "❌ Maaf, stok pengganti sedang habis."
+    );
+    return;
+  }
+
+  // tandai stok jadi sold
+  await pool.query(
+    `UPDATE stocks SET status='sold', order_id=$1 WHERE id=$2`,
+    [orderId, stock.id]
+  );
+
+  // kirim akun pengganti
+  const text =
+`🔄 AKUN PENGGANTI
+
+🧾 Order: #${orderId}
+
+Email    : ${stock.email}
+Password : ${stock.password}
+
+Silakan dicoba 🙏`;
+
+  await bot.telegram.sendMessage(order.telegram_id, text);
+
+  // notif admin
+  const { rows: [tenant] } = await pool.query(
+    `SELECT admin_telegram_id FROM tenants WHERE id=$1`,
+    [tenantId]
+  );
+
+  if (tenant?.admin_telegram_id) {
+    await bot.telegram.sendMessage(
+      tenant.admin_telegram_id,
+      `✅ Replace berhasil untuk Order #${orderId}`
+    );
+  }
+}
+
+module.exports = { 
+  assignStockAndDeliver,
+  replaceAccount // ✅ TAMBAH INI
+};
