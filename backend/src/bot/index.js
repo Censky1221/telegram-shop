@@ -8,6 +8,5 @@ require('./commands/start')(bot);
 require('./commands/products')(bot);
 require('./commands/orders')(bot);
 require('./actions/buy')(bot);
-require('./actions/complaint')(bot);
 
 module.exports = bot;

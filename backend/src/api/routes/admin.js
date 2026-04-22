@@ -605,23 +605,4 @@ router.post('/vouchers/validate', authMiddleware, async (req, res) => {
   }
 });
 
-// ── Complaint ─────────────────────────────────────
-router.post('/complaint', async (req, res) => {
-  const { order_id, stock_ids, reason } = req.body;
-
-  try {
-    const { rows: [c] } = await pool.query(
-      `INSERT INTO complaints (order_id, user_id, product_id, variant_id, stock_ids, reason, tenant_id)
-       SELECT o.id, o.user_id, o.product_id, o.variant_id, $2, $3, o.tenant_id
-       FROM orders o WHERE o.id=$1
-       RETURNING *`,
-      [order_id, stock_ids, reason]
-    );
-
-    res.json(c);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 module.exports = router;
