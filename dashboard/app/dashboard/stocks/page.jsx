@@ -23,6 +23,11 @@ export default function StocksPage() {
   const [editingId, setEditingId]             = useState(null);
   const [editForm, setEditForm]               = useState({ email: '', password: '', content: '' });
   const [editLoading, setEditLoading]         = useState(false);
+  const [refreshing, setRefreshing]           = useState(false);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds]         = useState([]);
+  const [bulkDeleting, setBulkDeleting]       = useState(false);
 
   useEffect(() => { fetchProducts(); }, []);
 
@@ -30,11 +35,13 @@ export default function StocksPage() {
     setSelectedVariant('');
     setVariants([]);
     setStocks([]);
+    setSelectedIds([]);
     if (selectedProduct) fetchVariants(selectedProduct);
   }, [selectedProduct]);
 
   useEffect(() => {
     setStocks([]);
+    setSelectedIds([]);
     if (selectedProduct) fetchStocks();
   }, [selectedVariant]);
 
@@ -53,6 +60,16 @@ export default function StocksPage() {
     const qs  = selectedVariant ? `?variantId=${selectedVariant}` : '';
     const res = await fetch(`${API}/api/admin/stocks/${selectedProduct}${qs}`, { headers: authHeaders() });
     setStocks(await res.json());
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    setSelectedIds([]);
+    try {
+      await fetchStocks();
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function handleUpload() {
@@ -116,11 +133,50 @@ export default function StocksPage() {
   async function handleDelete(id, status) {
     if (!confirm(status === 'sold' ? 'Stok ini sudah terjual. Yakin hapus?' : 'Hapus stok ini?')) return;
     await fetch(`${API}/api/admin/stocks/${id}`, { method: 'DELETE', headers: authHeaders() });
+    setSelectedIds(prev => prev.filter(sid => sid !== id));
     fetchStocks();
   }
 
-  const available = stocks.filter(s => s.status === 'available').length;
-  const sold      = stocks.filter(s => s.status === 'sold').length;
+  // Multi-select handlers
+  function toggleSelectOne(id) {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(sid => sid !== id) : [...prev, id]
+    );
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.length === stocks.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(stocks.map(s => s.id));
+    }
+  }
+
+  async function handleBulkDelete() {
+    const soldCount = stocks.filter(s => selectedIds.includes(s.id) && s.status === 'sold').length;
+    const msg = soldCount > 0
+      ? `Hapus ${selectedIds.length} stok? (${soldCount} di antaranya sudah terjual)`
+      : `Hapus ${selectedIds.length} stok yang dipilih?`;
+    if (!confirm(msg)) return;
+
+    setBulkDeleting(true);
+    try {
+      await Promise.all(
+        selectedIds.map(id =>
+          fetch(`${API}/api/admin/stocks/${id}`, { method: 'DELETE', headers: authHeaders() })
+        )
+      );
+      setSelectedIds([]);
+      fetchStocks();
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  const available   = stocks.filter(s => s.status === 'available').length;
+  const sold        = stocks.filter(s => s.status === 'sold').length;
+  const allSelected = stocks.length > 0 && selectedIds.length === stocks.length;
+  const someSelected = selectedIds.length > 0 && selectedIds.length < stocks.length;
 
   return (
     <div>
@@ -240,21 +296,82 @@ export default function StocksPage() {
       {/* Tabel stok */}
       {selectedProduct && (
         <div className="bg-white rounded-2xl shadow overflow-hidden">
-          <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div className="px-6 py-4 border-b flex items-center justify-between gap-3">
             <h2 className="font-medium">
               Stock {selectedVariant
                 ? `— ${variants.find(v => v.id === parseInt(selectedVariant))?.name}`
                 : '— Semua'}
             </h2>
-            <div className="flex gap-4 text-sm">
-              <span className="text-green-600 font-medium">✅ {available}</span>
-              <span className="text-gray-500">🔴 {sold}</span>
-              <span className="text-gray-400">Total: {stocks.length}</span>
+            <div className="flex items-center gap-3 flex-wrap">
+              {/* Bulk delete bar */}
+              {selectedIds.length > 0 && (
+                <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+                  <span className="text-sm text-red-600 font-medium">
+                    {selectedIds.length} dipilih
+                  </span>
+                  <button
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                    className="text-xs bg-red-600 text-white px-3 py-1 rounded-lg hover:bg-red-700 disabled:opacity-50 transition flex items-center gap-1"
+                  >
+                    {bulkDeleting ? (
+                      <>
+                        <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                        </svg>
+                        Menghapus...
+                      </>
+                    ) : '🗑️ Hapus Massal'}
+                  </button>
+                  <button
+                    onClick={() => setSelectedIds([])}
+                    className="text-xs text-gray-500 hover:text-gray-700 px-1"
+                    title="Batalkan pilihan"
+                  >✕</button>
+                </div>
+              )}
+
+              {/* Stats */}
+              <div className="flex gap-3 text-sm">
+                <span className="text-green-600 font-medium">✅ {available}</span>
+                <span className="text-gray-500">🔴 {sold}</span>
+                <span className="text-gray-400">Total: {stocks.length}</span>
+              </div>
+
+              {/* Refresh button */}
+              <button
+                onClick={handleRefresh}
+                disabled={refreshing}
+                title="Refresh data stok"
+                className="flex items-center gap-1.5 text-sm text-gray-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:bg-gray-50 hover:border-gray-400 disabled:opacity-50 transition"
+              >
+                <svg
+                  className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                {refreshing ? 'Memuat...' : 'Refresh'}
+              </button>
             </div>
           </div>
+
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-600 text-left">
               <tr>
+                <th className="px-4 py-3 w-10">
+                  {/* Select all checkbox */}
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected; }}
+                    onChange={toggleSelectAll}
+                    title={allSelected ? 'Batalkan semua' : 'Pilih semua'}
+                  />
+                </th>
                 <th className="px-4 py-3">#</th>
                 <th className="px-4 py-3">Konten / Email</th>
                 <th className="px-4 py-3">Password</th>
@@ -265,7 +382,21 @@ export default function StocksPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {stocks.map((s, i) => (
-                <tr key={s.id} className={`hover:bg-gray-50 ${editingId === s.id ? 'bg-blue-50' : ''}`}>
+                <tr
+                  key={s.id}
+                  className={`hover:bg-gray-50 transition-colors ${
+                    editingId === s.id ? 'bg-blue-50' :
+                    selectedIds.includes(s.id) ? 'bg-red-50' : ''
+                  }`}
+                >
+                  <td className="px-4 py-2">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded accent-blue-600 cursor-pointer"
+                      checked={selectedIds.includes(s.id)}
+                      onChange={() => toggleSelectOne(s.id)}
+                    />
+                  </td>
                   <td className="px-4 py-2 text-gray-400">{i + 1}</td>
 
                   {editingId === s.id ? (
@@ -349,7 +480,7 @@ export default function StocksPage() {
               ))}
               {!stocks.length && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-400">No stock.</td>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-400">No stock.</td>
                 </tr>
               )}
             </tbody>
