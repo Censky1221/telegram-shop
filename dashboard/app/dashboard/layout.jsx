@@ -108,7 +108,7 @@ export default function DashboardLayout({ children }) {
             const isActive = pathname.startsWith(item.href);
             return (
               <Link key={item.href} href={item.href}
-                className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
+                className="relative flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
               >
                 <span className={`text-xl leading-none transition-transform duration-150 ${isActive ? 'scale-110' : ''}`}>
                   {item.icon}
@@ -118,9 +118,9 @@ export default function DashboardLayout({ children }) {
                 }`}>
                   {item.label}
                 </span>
-                {/* Active underline dot */}
+                {/* Active indicator dot */}
                 {isActive && (
-                  <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600" />
+                  <span className="absolute bottom-0 w-6 h-0.5 rounded-full bg-blue-600" />
                 )}
               </Link>
             );
@@ -129,7 +129,7 @@ export default function DashboardLayout({ children }) {
           {/* "Lainnya" tab */}
           <button
             onClick={() => setMoreOpen((v) => !v)}
-            className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
+            className="relative flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
           >
             <span className={`text-xl leading-none transition-transform duration-150 ${moreOpen || moreActive ? 'scale-110' : ''}`}>
               ⋯
@@ -140,7 +140,7 @@ export default function DashboardLayout({ children }) {
               Lainnya
             </span>
             {moreActive && !moreOpen && (
-              <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600" />
+              <span className="absolute bottom-0 w-6 h-0.5 rounded-full bg-blue-600" />
             )}
           </button>
         </div>
