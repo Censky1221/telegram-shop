@@ -20,14 +20,14 @@ const sidebarItems = [
 const primaryNav = [
   { href: '/dashboard/statistik', label: 'Statistik', icon: '📊' },
   { href: '/dashboard/products',  label: 'Products',  icon: '📦' },
-  { href: '/dashboard/orders',    label: 'Orders',    icon: '📋' },
-  { href: '/dashboard/users',     label: 'Users',     icon: '👤' },
+  { href: '/dashboard/variants',  label: 'Varian',    icon: '🎛️' },
+  { href: '/dashboard/stocks',    label: 'Stocks',    icon: '🗄️' },
 ];
 
 // ── Mobile "Lainnya" sheet items ────────────────────────────────────────────
 const moreNav = [
-  { href: '/dashboard/variants',  label: '🎛️ Varian' },
-  { href: '/dashboard/stocks',    label: '🗄️ Stocks' },
+  { href: '/dashboard/orders',    label: '📋 Orders' },
+  { href: '/dashboard/users',     label: '👤 Users & Saldo' },
   { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
@@ -54,7 +54,7 @@ export default function DashboardLayout({ children }) {
   const moreActive = moreNav.some((item) => pathname.startsWith(item.href));
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-[100dvh] md:min-h-screen">
 
       {/* ── Desktop Sidebar (unchanged) ──────────────────────────────── */}
       <aside className="hidden md:flex flex-col w-56 bg-gray-900 text-white sticky top-0 h-screen">
@@ -82,7 +82,7 @@ export default function DashboardLayout({ children }) {
       </aside>
 
       {/* ── Main content area ─────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
 
         {/* Mobile header — clean, no hamburger */}
         <header className="md:hidden sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
@@ -94,7 +94,7 @@ export default function DashboardLayout({ children }) {
         </header>
 
         {/* Page content — pb-20 on mobile so content clears the bottom bar */}
-        <main className="flex-1 bg-gray-50 overflow-auto pb-20 md:pb-0">
+        <main className="flex-1 min-h-0 overflow-y-auto bg-gray-50 pb-24 md:pb-0">
           <div className="max-w-5xl mx-auto p-4 md:p-6">{children}</div>
         </main>
       </div>
