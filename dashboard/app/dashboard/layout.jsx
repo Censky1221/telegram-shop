@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-const navItems = [
+// ── Desktop sidebar: all items ──────────────────────────────────────────────
+const sidebarItems = [
   { href: '/dashboard/statistik', label: '📊 Statistik' },
   { href: '/dashboard/products',  label: '📦 Products' },
   { href: '/dashboard/variants',  label: '🎛️ Varian' },
@@ -15,42 +16,58 @@ const navItems = [
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
 ];
 
+// ── Mobile bottom bar: 4 primary tabs ──────────────────────────────────────
+const primaryNav = [
+  { href: '/dashboard/statistik', label: 'Statistik', icon: '📊' },
+  { href: '/dashboard/products',  label: 'Products',  icon: '📦' },
+  { href: '/dashboard/orders',    label: 'Orders',    icon: '📋' },
+  { href: '/dashboard/users',     label: 'Users',     icon: '👤' },
+];
+
+// ── Mobile "Lainnya" sheet items ────────────────────────────────────────────
+const moreNav = [
+  { href: '/dashboard/variants',  label: '🎛️ Varian' },
+  { href: '/dashboard/stocks',    label: '🗄️ Stocks' },
+  { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
+  { href: '/dashboard/broadcast', label: '📢 Broadcast' },
+  { href: '/dashboard/settings',  label: '⚙️ Settings' },
+];
+
 export default function DashboardLayout({ children }) {
-  const pathname  = usePathname();
-  const router    = useRouter();
-  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const router   = useRouter();
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem('token')) router.push('/login');
   }, []);
 
-  useEffect(() => { setOpen(false); }, [pathname]);
+  // Close sheet whenever route changes
+  useEffect(() => { setMoreOpen(false); }, [pathname]);
 
   function handleLogout() {
     localStorage.removeItem('token');
     router.push('/login');
   }
 
+  // Is any "more" item active?
+  const moreActive = moreNav.some((item) => pathname.startsWith(item.href));
+
   return (
     <div className="flex min-h-screen">
-      {open && (
-        <div className="fixed inset-0 bg-black/50 z-20 md:hidden" onClick={() => setOpen(false)} />
-      )}
-      <aside className={`
-        fixed top-0 left-0 h-full w-64 bg-gray-900 text-white flex flex-col z-30
-        transform transition-transform duration-300 ease-in-out
-        ${open ? 'translate-x-0' : '-translate-x-full'}
-        md:relative md:w-56 md:translate-x-0
-      `}>
-        <div className="px-6 py-5 border-b border-gray-700 flex items-center justify-between">
+
+      {/* ── Desktop Sidebar (unchanged) ──────────────────────────────── */}
+      <aside className="hidden md:flex flex-col w-56 bg-gray-900 text-white sticky top-0 h-screen">
+        <div className="px-6 py-5 border-b border-gray-700">
           <h1 className="font-semibold text-lg">🛍 Shop Admin</h1>
-          <button onClick={() => setOpen(false)} className="md:hidden text-gray-400 hover:text-white text-xl leading-none">✕</button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => (
+          {sidebarItems.map((item) => (
             <Link key={item.href} href={item.href}
               className={`flex items-center px-3 py-2.5 rounded-lg text-sm transition ${
-                pathname.startsWith(item.href) ? 'bg-blue-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                pathname.startsWith(item.href)
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-300 hover:bg-gray-700'
               }`}>
               {item.label}
             </Link>
@@ -63,19 +80,118 @@ export default function DashboardLayout({ children }) {
           </button>
         </div>
       </aside>
+
+      {/* ── Main content area ─────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="md:hidden sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-          <button onClick={() => setOpen(true)} className="text-gray-700 hover:text-gray-900 p-1 rounded-lg hover:bg-gray-100 transition">
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <span className="font-semibold text-gray-800">🛍 Shop Admin</span>
+
+        {/* Mobile header — clean, no hamburger */}
+        <header className="md:hidden sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shadow-sm">
+          <span className="font-bold text-gray-800 text-base">🛍 Shop Admin</span>
+          {/* Avatar placeholder */}
+          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold select-none">
+            A
+          </div>
         </header>
-        <main className="flex-1 bg-gray-50 overflow-auto">
+
+        {/* Page content — pb-20 on mobile so content clears the bottom bar */}
+        <main className="flex-1 bg-gray-50 overflow-auto pb-20 md:pb-0">
           <div className="max-w-5xl mx-auto p-4 md:p-6">{children}</div>
         </main>
       </div>
+
+      {/* ── Mobile Bottom Navigation Bar ─────────────────────────────── */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-white border-t border-gray-200 shadow-[0_-2px_12px_rgba(0,0,0,0.08)]">
+        <div className="flex items-stretch h-16">
+
+          {/* Primary tabs */}
+          {primaryNav.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link key={item.href} href={item.href}
+                className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
+              >
+                <span className={`text-xl leading-none transition-transform duration-150 ${isActive ? 'scale-110' : ''}`}>
+                  {item.icon}
+                </span>
+                <span className={`text-[10px] font-medium leading-tight ${
+                  isActive ? 'text-blue-600' : 'text-gray-400'
+                }`}>
+                  {item.label}
+                </span>
+                {/* Active underline dot */}
+                {isActive && (
+                  <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600" />
+                )}
+              </Link>
+            );
+          })}
+
+          {/* "Lainnya" tab */}
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-colors select-none"
+          >
+            <span className={`text-xl leading-none transition-transform duration-150 ${moreOpen || moreActive ? 'scale-110' : ''}`}>
+              ⋯
+            </span>
+            <span className={`text-[10px] font-medium leading-tight ${
+              moreOpen || moreActive ? 'text-blue-600' : 'text-gray-400'
+            }`}>
+              Lainnya
+            </span>
+            {moreActive && !moreOpen && (
+              <span className="absolute bottom-1 w-1 h-1 rounded-full bg-blue-600" />
+            )}
+          </button>
+        </div>
+      </nav>
+
+      {/* ── "Lainnya" slide-up sheet ──────────────────────────────────── */}
+      {/* Backdrop */}
+      {moreOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
+          onClick={() => setMoreOpen(false)}
+        />
+      )}
+
+      {/* Sheet */}
+      <div className={`
+        md:hidden fixed bottom-0 left-0 right-0 z-50
+        bg-white rounded-t-2xl shadow-2xl
+        transform transition-transform duration-300 ease-out
+        ${moreOpen ? 'translate-y-0' : 'translate-y-full'}
+      `}>
+        {/* Drag handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 rounded-full bg-gray-300" />
+        </div>
+
+        <div className="px-2 pb-4 pt-2 space-y-1">
+          {moreNav.map((item) => (
+            <Link key={item.href} href={item.href}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition ${
+                pathname.startsWith(item.href)
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}>
+              {item.label}
+            </Link>
+          ))}
+
+          <hr className="my-2 border-gray-100" />
+
+          {/* Logout inside sheet */}
+          <button onClick={handleLogout}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition">
+            🚪 Logout
+          </button>
+        </div>
+
+        {/* Bottom safe-area spacer (for phones with home indicator) */}
+        <div className="h-4" />
+      </div>
+
     </div>
   );
 }
