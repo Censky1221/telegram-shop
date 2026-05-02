@@ -13,14 +13,16 @@ async function getTenantPaymentConfig(tenantId) {
   );
   if (!tenant) throw new Error('Tenant not found');
 
+  const gateway = tenant.payment_gateway || 'tripay';
+
   return {
-    gateway      : tenant.payment_gateway || 'tripay',
-    api_key      : tenant.tripay_api_key,
+    gateway,
+    // api_key disesuaikan dengan gateway
+    api_key      : gateway === 'pakasir' ? tenant.pakasir_api_key : tenant.tripay_api_key,
     private_key  : tenant.tripay_private_key,
     merchant_code: tenant.tripay_merchant_code,
     mode         : tenant.tripay_mode || 'sandbox',
-    pakasir_api_key    : tenant.pakasir_api_key,
-    project_slug       : tenant.pakasir_project_slug,
+    project_slug : tenant.pakasir_project_slug,
   };
 }
 

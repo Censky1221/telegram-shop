@@ -358,15 +358,20 @@ async function submitOrder() {
       headers: { 'Content-Type': 'application/json' },
       body   : JSON.stringify(body),
     });
-    const data = await res.json();
 
-    if (!res.ok) { showErr(errEl, data.error || 'Gagal membuat order'); return; }
+    let data = {};
+    try { data = await res.json(); } catch(_) {}
+
+    if (!res.ok) {
+      showErr(errEl, data.error || `Gagal buat order (${res.status})`);
+      return;
+    }
 
     state.currentOrder = data;
     showPaymentStep(data);
 
   } catch (e) {
-    showErr(errEl, 'Koneksi gagal, coba lagi');
+    showErr(errEl, 'Koneksi gagal: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = '💳 Lanjut ke Pembayaran';
