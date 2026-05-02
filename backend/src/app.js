@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors    = require('cors');
-const path    = require('path');
 
 const { loadAllTenants, stopAllBots } = require('./bot/tenantManager');
 const productsRouter = require('./api/routes/products');
@@ -10,8 +9,6 @@ const webhookRouter  = require('./api/routes/webhook');
 const adminRouter    = require('./api/routes/admin');
 const tenantRouter   = require('./api/routes/tenant');
 const superRouter    = require('./api/routes/super');
-const webRouter      = require('./api/routes/web');
-const { autoExpireWebOrders } = require('./api/routes/web');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -21,20 +18,12 @@ app.use(cors());
 app.use('/api/webhook', webhookRouter);
 app.use(express.json());
 
-// ── Serve Webstore (static) ─────────────────────────────────
-// Folder webstore ada di dalam backend/ (ikut ter-deploy ke Railway)
-const webstoreDir = path.join(__dirname, '../webstore');
-app.use(express.static(webstoreDir));
-// Fallback: GET / → index.html
-app.get('/', (_, res) => res.sendFile(path.join(webstoreDir, 'index.html')));
-
 // ── Routes ──────────────────────────────────────────────────
 app.use('/api/products', productsRouter);
 app.use('/api/orders',   ordersRouter);
 app.use('/api/admin',    adminRouter);
 app.use('/api/tenant',   tenantRouter);
 app.use('/api/super',    superRouter);
-app.use('/api/web',      webRouter);
 
 app.get('/health', (_, res) => res.json({ status: 'ok', ts: new Date() }));
 
@@ -71,8 +60,6 @@ setInterval(async () => {
     if (expiredOrders.length > 0) {
       console.log(`⏰ Auto expired ${expiredOrders.length} order(s)`);
     }
-    // Juga expire web orders
-    await autoExpireWebOrders();
   } catch (err) {
     console.error('Auto expire error:', err.message);
   }
@@ -112,40 +99,6 @@ module.exports.notifyAdminNewOrder = notifyAdminNewOrder;
 // ── Start ───────────────────────────────────────────────────
 app.listen(PORT, async () => {
   console.log(`API running on http://localhost:${PORT}`);
-
-  // Auto-migrate tabel web_orders jika belum ada
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS web_orders (
-        id              SERIAL PRIMARY KEY,
-        tenant_id       INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
-        product_id      INTEGER REFERENCES products(id),
-        variant_id      INTEGER,
-        buyer_email     VARCHAR(300) NOT NULL,
-        buyer_name      VARCHAR(200),
-        qty             INTEGER DEFAULT 1,
-        amount          INTEGER NOT NULL,
-        payment_id      VARCHAR(200) UNIQUE,
-        payment_url     TEXT,
-        payment_gateway VARCHAR(50) DEFAULT 'tripay',
-        status          VARCHAR(20) DEFAULT 'pending'
-                        CHECK (status IN ('pending','paid','failed','expired')),
-        delivered       BOOLEAN DEFAULT false,
-        delivery_content TEXT,
-        created_at      TIMESTAMPTZ DEFAULT NOW(),
-        paid_at         TIMESTAMPTZ,
-        expired_at      TIMESTAMPTZ
-      );
-      CREATE INDEX IF NOT EXISTS idx_web_orders_tenant  ON web_orders(tenant_id);
-      CREATE INDEX IF NOT EXISTS idx_web_orders_payment ON web_orders(payment_id);
-      CREATE INDEX IF NOT EXISTS idx_web_orders_email   ON web_orders(buyer_email);
-      CREATE INDEX IF NOT EXISTS idx_web_orders_status  ON web_orders(status);
-    `);
-    console.log('✅ web_orders table ready');
-  } catch (err) {
-    console.error('web_orders migration error:', err.message);
-  }
-
   await loadAllTenants();
 });
 
