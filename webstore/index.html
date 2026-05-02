@@ -180,13 +180,11 @@
 
         <!-- QRIS / Tripay -->
         <div id="payment-qris-section" style="display:none">
-          <div class="qris-info">
-            <p>Salin kode QRIS di bawah lalu buka aplikasi dompet digital kamu (GoPay, OVO, DANA, dll) dan pilih "Bayar QRIS":</p>
+          <div class="qris-wrapper">
+            <img id="qris-image" src="" alt="QR Code Pembayaran" class="qris-img" />
+            <div class="qris-badge">Scan dengan GoPay / OVO / DANA / ShopeePay</div>
           </div>
-          <div class="qris-code-box">
-            <code id="qris-code-text"></code>
-            <button class="copy-btn" onclick="copyQRIS()" id="copy-qris-btn">📋 Salin Kode</button>
-          </div>
+          <button class="copy-btn copy-btn-full" onclick="copyQRIS()" id="copy-qris-btn">📋 Salin Kode QRIS</button>
         </div>
 
         <div id="payment-url-section" style="display:none">

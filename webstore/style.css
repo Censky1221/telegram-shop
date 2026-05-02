@@ -369,13 +369,28 @@ img { max-width: 100%; }
 }
 .timer-box strong { color: var(--warning); font-size: 1.1rem; }
 
-.qris-info { font-size: .85rem; color: var(--text2); margin-bottom: 12px; }
-.qris-code-box {
-  background: var(--surface2); border: 1px solid var(--border);
-  border-radius: var(--radius-sm); padding: 14px; margin-bottom: 16px;
-  display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+/* QR Code Image */
+.qris-wrapper {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  background: #fff; border-radius: 16px; padding: 20px;
+  margin-bottom: 14px;
 }
-.qris-code-box code { font-size: .72rem; word-break: break-all; flex: 1; color: var(--accent); font-family: monospace; }
+.qris-img {
+  width: 240px; height: 240px; border-radius: 8px;
+  display: block; image-rendering: pixelated;
+}
+.qris-badge {
+  font-size: .78rem; font-weight: 600; color: #555;
+  text-align: center;
+}
+.copy-btn-full {
+  width: 100%; justify-content: center; display: flex;
+  padding: 12px; border-radius: var(--radius-sm);
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--text2); font-size: .875rem; font-weight: 600;
+  cursor: pointer; transition: all .2s; margin-bottom: 12px;
+}
+.copy-btn-full:hover { background: var(--primary); color: #fff; border-color: var(--primary); }
 .copy-btn {
   background: var(--surface); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px 12px; font-size: .78rem;

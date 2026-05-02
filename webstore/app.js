@@ -358,15 +358,20 @@ async function submitOrder() {
       headers: { 'Content-Type': 'application/json' },
       body   : JSON.stringify(body),
     });
-    const data = await res.json();
 
-    if (!res.ok) { showErr(errEl, data.error || 'Gagal membuat order'); return; }
+    let data = {};
+    try { data = await res.json(); } catch(_) {}
+
+    if (!res.ok) {
+      showErr(errEl, data.error || `Gagal buat order (${res.status})`);
+      return;
+    }
 
     state.currentOrder = data;
     showPaymentStep(data);
 
   } catch (e) {
-    showErr(errEl, 'Koneksi gagal, coba lagi');
+    showErr(errEl, 'Koneksi gagal: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.textContent = '💳 Lanjut ke Pembayaran';
@@ -386,11 +391,19 @@ function showPaymentStep(order) {
   document.getElementById('payment-status-title').textContent = 'Menunggu Pembayaran';
   document.getElementById('payment-status-desc').textContent  = 'Selesaikan pembayaran sebelum waktu habis';
 
-  // Pakasir QRIS
+  // Pakasir QRIS → tampilkan sebagai gambar QR
   if (order.payment_number) {
     document.getElementById('payment-qris-section').style.display = 'block';
     document.getElementById('payment-url-section').style.display  = 'none';
-    document.getElementById('qris-code-text').textContent = order.payment_number;
+
+    // Generate QR image dari payment_number pakai free API
+    const qrData = encodeURIComponent(order.payment_number);
+    document.getElementById('qris-image').src =
+      `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=${qrData}`;
+
+    // Simpan raw string untuk tombol salin
+    document.getElementById('copy-qris-btn').dataset.qris = order.payment_number;
+
   } else if (order.payment_url) {
     document.getElementById('payment-url-section').style.display  = 'block';
     document.getElementById('payment-qris-section').style.display = 'none';
@@ -482,7 +495,10 @@ function showOrderFailed(status) {
 }
 
 function copyQRIS() {
-  const code = document.getElementById('qris-code-text').textContent;
+  // Ambil raw QRIS string dari data attribute tombol
+  const btn  = document.getElementById('copy-qris-btn');
+  const code = btn.dataset.qris || '';
+  if (!code) return;
   navigator.clipboard.writeText(code).then(() => showToast('✅ Kode QRIS berhasil disalin!'));
 }
 
