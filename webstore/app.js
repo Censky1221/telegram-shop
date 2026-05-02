@@ -391,19 +391,12 @@ function showPaymentStep(order) {
   document.getElementById('payment-status-title').textContent = 'Menunggu Pembayaran';
   document.getElementById('payment-status-desc').textContent  = 'Selesaikan pembayaran sebelum waktu habis';
 
-  // Pakasir QRIS → tampilkan sebagai gambar QR
-  if (order.payment_number) {
+  // Pakasir QRIS → tampilkan gambar QR dari backend
+  if (order.qr_image) {
     document.getElementById('payment-qris-section').style.display = 'block';
     document.getElementById('payment-url-section').style.display  = 'none';
-
-    // Generate QR image dari payment_number pakai free API
-    const qrData = encodeURIComponent(order.payment_number);
-    document.getElementById('qris-image').src =
-      `https://api.qrserver.com/v1/create-qr-code/?size=280x280&margin=10&data=${qrData}`;
-
-    // Simpan raw string untuk tombol salin
-    document.getElementById('copy-qris-btn').dataset.qris = order.payment_number;
-
+    document.getElementById('qris-image').src = order.qr_image;  // base64 PNG dari server
+    document.getElementById('copy-qris-btn').dataset.qris = order.payment_number || '';
   } else if (order.payment_url) {
     document.getElementById('payment-url-section').style.display  = 'block';
     document.getElementById('payment-qris-section').style.display = 'none';

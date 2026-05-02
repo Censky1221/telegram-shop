@@ -391,11 +391,12 @@ function showPaymentStep(order) {
   document.getElementById('payment-status-title').textContent = 'Menunggu Pembayaran';
   document.getElementById('payment-status-desc').textContent  = 'Selesaikan pembayaran sebelum waktu habis';
 
-  // Pakasir QRIS
-  if (order.payment_number) {
+  // Pakasir QRIS → tampilkan gambar QR dari backend
+  if (order.qr_image) {
     document.getElementById('payment-qris-section').style.display = 'block';
     document.getElementById('payment-url-section').style.display  = 'none';
-    document.getElementById('qris-code-text').textContent = order.payment_number;
+    document.getElementById('qris-image').src = order.qr_image;  // base64 PNG dari server
+    document.getElementById('copy-qris-btn').dataset.qris = order.payment_number || '';
   } else if (order.payment_url) {
     document.getElementById('payment-url-section').style.display  = 'block';
     document.getElementById('payment-qris-section').style.display = 'none';
@@ -487,7 +488,10 @@ function showOrderFailed(status) {
 }
 
 function copyQRIS() {
-  const code = document.getElementById('qris-code-text').textContent;
+  // Ambil raw QRIS string dari data attribute tombol
+  const btn  = document.getElementById('copy-qris-btn');
+  const code = btn.dataset.qris || '';
+  if (!code) return;
   navigator.clipboard.writeText(code).then(() => showToast('✅ Kode QRIS berhasil disalin!'));
 }
 

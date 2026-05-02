@@ -1,7 +1,8 @@
-const express = require('express');
-const router  = express.Router();
+const express  = require('express');
+const router   = express.Router();
 const { pool } = require('../../db/pool');
 const { createPayment } = require('../../services/paymentService');
+const QRCode   = require('qrcode');  // sudah ada di package.json
 
 // ── Helper: ambil config payment tenant ──────────────────────────
 async function getTenantPaymentConfig(tenantId) {
@@ -266,12 +267,27 @@ router.post('/order', async (req, res) => {
       [paymentId, payment.payment_url, config.gateway, expiredAt, webOrder.id]
     );
 
+    // Generate QR code image jika payment via Pakasir (QRIS)
+    let qr_image = null;
+    if (payment.payment_number) {
+      try {
+        qr_image = await QRCode.toDataURL(payment.payment_number, {
+          width : 300,
+          margin: 2,
+          color : { dark: '#000000', light: '#ffffff' },
+        });
+      } catch (e) {
+        console.warn('QR generate error:', e.message);
+      }
+    }
+
     res.json({
       order_id       : webOrder.id,
       payment_id     : paymentId,
       amount,
       payment_url    : payment.payment_url,
-      payment_number : payment.payment_number || null, // untuk Pakasir QRIS
+      payment_number : payment.payment_number || null,
+      qr_image,                    // base64 PNG — langsung bisa dipakai di <img src>
       gateway        : config.gateway,
       expired_at     : expiredAt,
     });
