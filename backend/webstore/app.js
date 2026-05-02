@@ -125,7 +125,7 @@ function renderProducts() {
     footer.appendChild(stockEl);
     card.appendChild(footer);
 
-    // ── Tombol Beli ── pakai addEventListener, BUKAN onclick attribute
+    // ── Tombol Beli ── pakai addEventListener
     const buyBtn = document.createElement('button');
     buyBtn.className = 'card-buy-btn';
     buyBtn.disabled  = outOfStock;
@@ -135,6 +135,14 @@ function renderProducts() {
       openProductModal(p.id);
     });
     card.appendChild(buyBtn);
+
+    // ── Seluruh card juga bisa diklik (kecuali stok habis) ──
+    if (!outOfStock) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', function() {
+        openProductModal(p.id);
+      });
+    }
 
     grid.appendChild(card);
   });

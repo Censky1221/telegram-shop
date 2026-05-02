@@ -73,33 +73,77 @@ function renderProducts() {
   empty.style.display = 'none';
 
   prods.forEach(p => {
-    const hasVariants   = p.variants && p.variants.length > 0;
-    const stockCount    = hasVariants
+    const hasVariants = p.variants && p.variants.length > 0;
+    const stockCount  = hasVariants
       ? p.variants.reduce((s, v) => s + parseInt(v.stock_count || 0), 0)
       : parseInt(p.stock_count || 0);
-    const outOfStock    = stockCount === 0;
-    const stockClass    = outOfStock ? 'stock-empty' : (stockCount < 5 ? 'stock-low' : 'stock-ok');
-    const stockLabel    = outOfStock ? '❌ Habis' : `✅ ${stockCount} tersedia`;
-    const priceLabel    = hasVariants ? `Mulai ${fmtRp(Math.min(...p.variants.map(v => v.price)))}` : fmtRp(p.price);
-    const icons         = ['📦','💎','⚡','🎮','🎯','🌟','🔑','🎁','🛡️','💻'];
-    const icon          = icons[p.id % icons.length];
+    const outOfStock  = stockCount === 0;
+    const stockClass  = outOfStock ? 'stock-empty' : (stockCount < 5 ? 'stock-low' : 'stock-ok');
+    const stockLabel  = outOfStock ? '❌ Habis' : `✅ ${stockCount} tersedia`;
+    const priceLabel  = hasVariants ? `Mulai ${fmtRp(Math.min(...p.variants.map(v => v.price)))}` : fmtRp(p.price);
+    const icons       = ['📦','💎','⚡','🎮','🎯','🌟','🔑','🎁','🛡️','💻'];
+    const icon        = icons[p.id % icons.length];
 
+    // ── Buat card dengan createElement (bukan innerHTML onclick) ──
     const card = document.createElement('div');
     card.className = 'product-card';
     card.id = `product-card-${p.id}`;
-    card.innerHTML = `
-      ${hasVariants ? '<span class="has-variants-badge">Pilih Varian</span>' : ''}
-      <div class="product-card-icon">${icon}</div>
-      <div class="product-card-name">${esc(p.name)}</div>
-      ${p.description ? `<div class="product-card-desc">${esc(p.description)}</div>` : ''}
-      <div class="product-card-footer">
-        <span class="product-card-price">${priceLabel}</span>
-        <span class="product-card-stock ${stockClass}">${stockLabel}</span>
-      </div>
-      <button class="card-buy-btn" ${outOfStock ? 'disabled' : ''} onclick="openProductModal(${p.id})">
-        ${outOfStock ? '😔 Stok Habis' : '🛒 Beli Sekarang'}
-      </button>
-    `;
+
+    if (hasVariants) {
+      const badge = document.createElement('span');
+      badge.className = 'has-variants-badge';
+      badge.textContent = 'Pilih Varian';
+      card.appendChild(badge);
+    }
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'product-card-icon';
+    iconEl.textContent = icon;
+    card.appendChild(iconEl);
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'product-card-name';
+    nameEl.textContent = p.name;
+    card.appendChild(nameEl);
+
+    if (p.description) {
+      const descEl = document.createElement('div');
+      descEl.className = 'product-card-desc';
+      descEl.textContent = p.description;
+      card.appendChild(descEl);
+    }
+
+    const footer = document.createElement('div');
+    footer.className = 'product-card-footer';
+    const priceEl = document.createElement('span');
+    priceEl.className = 'product-card-price';
+    priceEl.textContent = priceLabel;
+    const stockEl = document.createElement('span');
+    stockEl.className = `product-card-stock ${stockClass}`;
+    stockEl.textContent = stockLabel;
+    footer.appendChild(priceEl);
+    footer.appendChild(stockEl);
+    card.appendChild(footer);
+
+    // ── Tombol Beli ── pakai addEventListener
+    const buyBtn = document.createElement('button');
+    buyBtn.className = 'card-buy-btn';
+    buyBtn.disabled  = outOfStock;
+    buyBtn.textContent = outOfStock ? '😔 Stok Habis' : '🛒 Beli Sekarang';
+    buyBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openProductModal(p.id);
+    });
+    card.appendChild(buyBtn);
+
+    // ── Seluruh card juga bisa diklik (kecuali stok habis) ──
+    if (!outOfStock) {
+      card.style.cursor = 'pointer';
+      card.addEventListener('click', function() {
+        openProductModal(p.id);
+      });
+    }
+
     grid.appendChild(card);
   });
 }
@@ -264,7 +308,13 @@ function goToCheckout() {
 function goBackToDetail() { showStep('detail'); }
 
 function closeProductModal(e) {
+  // Dipanggil dari overlay click — tutup hanya jika klik tepat di overlay
   if (e && e.target !== document.getElementById('product-modal')) return;
+  _closeProductModal();
+}
+
+function closeProductModalForce() {
+  // Dipanggil dari tombol ✕
   _closeProductModal();
 }
 
