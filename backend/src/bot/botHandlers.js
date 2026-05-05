@@ -11,7 +11,7 @@ const PAKASIR_URL    = 'https://app.pakasir.com/api';
 const MAIN_KEYBOARD = Markup.keyboard([
   ['🛍 Daftar Produk', '💰 Saldo Saya'],
   ['📦 Pesanan Saya',  '🎟️ Voucher'],
-  ['📞 Bantuan'],
+  ['🗳️ Vote',          '📞 Bantuan'],
 ]).resize();
 
 module.exports = function registerHandlers(bot, tenant) {
@@ -62,7 +62,141 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch { ctx.reply('Gagal memuat bantuan.'); }
   });
 
+  // ── 🗳️ Vote — Tampilkan daftar vote aktif ────────────────
+  bot.hears('🗳️ Vote', async (ctx) => {
+    try {
+      const { rows: votes } = await pool.query(
+        `SELECT v.*,
+                COUNT(DISTINCT vr.voter_key) AS total_voters
+         FROM votes v
+         LEFT JOIN vote_responses vr ON vr.vote_id = v.id
+         WHERE v.tenant_id=$1 AND v.is_active=true
+           AND (v.ended_at IS NULL OR v.ended_at > NOW())
+         GROUP BY v.id
+         ORDER BY v.created_at DESC`,
+        [tenantId]
+      );
+
+      if (!votes.length) {
+        return ctx.reply(
+          '🗳️ *Vote & Polling*\n\nBelum ada polling aktif saat ini.\nNantikan polling selanjutnya! 😊',
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+      // Tampilkan setiap vote sebagai pesan terpisah
+      for (const vote of votes) {
+        const { rows: options } = await pool.query(
+          `SELECT vo.*, COUNT(vr.id) AS vote_count
+           FROM vote_options vo
+           LEFT JOIN vote_responses vr ON vr.option_id = vo.id
+           WHERE vo.vote_id=$1
+           GROUP BY vo.id ORDER BY vo.sort_order, vo.id`,
+          [vote.id]
+        );
+
+        const totalVotes = options.reduce((s, o) => s + parseInt(o.vote_count || 0), 0);
+        const voterKey   = ctx.from.id.toString();
+
+        // Cek apakah user sudah vote
+        const { rows: [myVote] } = await pool.query(
+          `SELECT option_id FROM vote_responses WHERE vote_id=$1 AND voter_key=$2 LIMIT 1`,
+          [vote.id, voterKey]
+        );
+
+        const text = buildVoteText(vote, options, totalVotes);
+
+        if (myVote) {
+          // Sudah vote — tampilkan hasil saja tanpa tombol pilih
+          const myOption = options.find(o => o.id === myVote.option_id);
+          await ctx.reply(
+            text + `\n\n✅ *Kamu sudah memilih: ${myOption?.emoji || ''} ${myOption?.label || ''}*`,
+            { parse_mode: 'Markdown' }
+          );
+        } else {
+          // Belum vote — tampilkan tombol pilihan
+          const buttons = options.map(opt => [
+            Markup.button.callback(
+              `${opt.emoji || ''} ${opt.label}`,
+              `do_vote_${vote.id}_${opt.id}`
+            )
+          ]);
+          await ctx.reply(text + '\n\n👇 *Pilih jawabanmu:*', {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard(buttons),
+          });
+        }
+      }
+    } catch (err) {
+      console.error('vote list error:', err);
+      ctx.reply('Gagal memuat vote.');
+    }
+  });
+
+  // ── 🗳️ Vote — Proses pilihan user ────────────────────────
+  bot.action(/^do_vote_(\d+)_(\d+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const voteId    = parseInt(ctx.match[1]);
+    const optionId  = parseInt(ctx.match[2]);
+    const voterKey  = ctx.from.id.toString();
+
+    try {
+      // Ambil data vote
+      const { rows: [vote] } = await pool.query(
+        `SELECT * FROM votes WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+        [voteId, tenantId]
+      );
+      if (!vote) return ctx.answerCbQuery('❌ Vote tidak ditemukan atau sudah tidak aktif.', { show_alert: true });
+      if (vote.ended_at && new Date(vote.ended_at) < new Date())
+        return ctx.answerCbQuery('⏰ Vote ini sudah berakhir.', { show_alert: true });
+
+      // Cek sudah vote belum (multi-pilih: cek per opsi; single: cek per vote)
+      if (!vote.is_multiple) {
+        const { rows: [existing] } = await pool.query(
+          `SELECT id FROM vote_responses WHERE vote_id=$1 AND voter_key=$2 LIMIT 1`,
+          [voteId, voterKey]
+        );
+        if (existing) return ctx.answerCbQuery('✅ Kamu sudah memberikan suara di polling ini!', { show_alert: true });
+      } else {
+        const { rows: [existing] } = await pool.query(
+          `SELECT id FROM vote_responses WHERE vote_id=$1 AND option_id=$2 AND voter_key=$3 LIMIT 1`,
+          [voteId, optionId, voterKey]
+        );
+        if (existing) return ctx.answerCbQuery('✅ Kamu sudah memilih opsi ini!', { show_alert: true });
+      }
+
+      // Simpan vote
+      await pool.query(
+        `INSERT INTO vote_responses (vote_id, option_id, voter_key) VALUES ($1,$2,$3)
+         ON CONFLICT DO NOTHING`,
+        [voteId, optionId, voterKey]
+      );
+
+      // Ambil hasil terbaru
+      const { rows: options } = await pool.query(
+        `SELECT vo.*, COUNT(vr.id) AS vote_count
+         FROM vote_options vo
+         LEFT JOIN vote_responses vr ON vr.option_id = vo.id
+         WHERE vo.vote_id=$1
+         GROUP BY vo.id ORDER BY vo.sort_order, vo.id`,
+        [voteId]
+      );
+      const totalVotes = options.reduce((s, o) => s + parseInt(o.vote_count || 0), 0);
+      const chosen     = options.find(o => o.id === optionId);
+
+      const text = buildVoteText(vote, options, totalVotes) +
+        `\n\n✅ *Suaramu telah dicatat!*\nKamu memilih: *${chosen?.emoji || ''} ${chosen?.label || ''}*`;
+
+      await ctx.editMessageText(text, { parse_mode: 'Markdown' }).catch(() => {});
+
+    } catch (err) {
+      console.error('do_vote error:', err);
+      ctx.answerCbQuery('Gagal memproses suara.', { show_alert: true });
+    }
+  });
+
   // ── Daftar Produk ─────────────────────────────────────────
+
   bot.hears('🛍 Daftar Produk', async (ctx) => { await showLoadingThenProductList(ctx); });
 
   // ── Menu ──────────────────────────────────────────────────
@@ -1086,4 +1220,27 @@ bot.action(/^refresh_product_variants_(\d+)$/, async (ctx) => {
       productId ? `back_to_product_${productId}` : 'back_to_list')],
   ]);
 }
-};
+
+// ── Vote helpers (diluar registerHandlers supaya bisa dipakai di dalam) ──
+function buildVoteText(vote, options, totalVotes) {
+  const ended  = vote.ended_at && new Date(vote.ended_at) < new Date();
+  const status = ended ? '🔒 Sudah Berakhir' : vote.is_active ? '🟢 Sedang Berlangsung' : '⏸ Tidak Aktif';
+
+  let text = `🗳️ *${vote.title}*\n${status}\n`;
+  if (vote.description) text += `\n📝 ${vote.description}\n`;
+  text += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+
+  for (const opt of options) {
+    const count = parseInt(opt.vote_count || 0);
+    const pct   = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+    const bar   = '█'.repeat(Math.round(pct / 10)) + '░'.repeat(10 - Math.round(pct / 10));
+    text += `\n${opt.emoji || '▪️'} *${opt.label}*\n${bar} ${count} suara (${pct}%)\n`;
+  }
+
+  text += `\n━━━━━━━━━━━━━━━━━━━━\n👥 Total: *${totalVotes} suara*`;
+  if (vote.ended_at) {
+    text += `\n⏰ Berakhir: ${new Date(vote.ended_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`;
+  }
+  return text;
+}
+};
