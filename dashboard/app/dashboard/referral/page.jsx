@@ -9,22 +9,26 @@ const authHeaders = () => ({
 
 const STATUS_LABEL = { pending: '⏳ Pending', approved: '✅ Disetujui', paid: '💰 Lunas', rejected: '❌ Ditolak' };
 const STATUS_COLOR = {
-  pending:  'bg-yellow-100 text-yellow-700',
+  pending: 'bg-yellow-100 text-yellow-700',
   approved: 'bg-blue-100 text-blue-700',
-  paid:     'bg-green-100 text-green-700',
+  paid: 'bg-green-100 text-green-700',
   rejected: 'bg-red-100 text-red-600',
 };
 
 export default function ReferralPage() {
-  const [settings, setSettings]       = useState({ bonus_amount: 500, is_active: true, min_withdraw: 10000 });
-  const [stats, setStats]             = useState(null);
+  const [settings, setSettings]         = useState({ bonus_amount: 500, is_active: true, min_withdraw: 10000 });
+  const [stats, setStats]               = useState(null);
   const [topReferrers, setTopReferrers] = useState([]);
-  const [withdrawals, setWithdrawals] = useState([]);
+  const [joinedUsers, setJoinedUsers]   = useState([]);
+  const [pendingRef, setPendingRef]     = useState([]);
+  const [withdrawals, setWithdrawals]   = useState([]);
   const [filterStatus, setFilterStatus] = useState('');
-  const [saving, setSaving]           = useState(false);
-  const [noteModal, setNoteModal]     = useState(null); // { id, action }
-  const [note, setNote]               = useState('');
-  const [loading, setLoading]         = useState(true);
+  const [joinedTab, setJoinedTab]       = useState('done');
+  const [saving, setSaving]             = useState(false);
+  const [noteModal, setNoteModal]       = useState(null);
+  const [note, setNote]                 = useState('');
+  const [loading, setLoading]           = useState(true);
+
 
   useEffect(() => {
     fetchAll();
@@ -32,25 +36,53 @@ export default function ReferralPage() {
 
   async function fetchAll() {
     setLoading(true);
+
+    // Fetch setiap endpoint secara independen agar satu gagal tidak blokir yang lain
     try {
-      const [sRes, stRes, wRes] = await Promise.all([
-        fetch(`${API}/api/admin/referral/settings`, { headers: authHeaders() }),
-        fetch(`${API}/api/admin/referral/stats`, { headers: authHeaders() }),
-        fetch(`${API}/api/admin/withdrawals`, { headers: authHeaders() }),
-      ]);
+      const sRes = await fetch(`${API}/api/admin/referral/settings`, { headers: authHeaders() });
       if (sRes.ok) setSettings(await sRes.json());
-      if (stRes.ok) { const d = await stRes.json(); setStats(d.stats); setTopReferrers(d.topReferrers); }
-      if (wRes.ok) setWithdrawals(await wRes.json());
-    } catch {}
+    } catch (e) { console.error('settings fetch error:', e); }
+
+    try {
+      const stRes = await fetch(`${API}/api/admin/referral/stats`, { headers: authHeaders() });
+      if (stRes.ok) {
+        const d = await stRes.json();
+        setStats(d.stats);
+        setTopReferrers(d.topReferrers || []);
+        setJoinedUsers(d.joinedUsers || []);
+        setPendingRef(d.pendingReferrals || []);
+      } else { console.error('stats status:', stRes.status, await stRes.text().catch(()=>'')); }
+    } catch (e) { console.error('stats fetch error:', e); }
+
+    try {
+      const wRes = await fetch(`${API}/api/admin/withdrawals`, { headers: authHeaders() });
+      console.log('withdrawals status:', wRes.status);
+      if (wRes.ok) {
+        const data = await wRes.json();
+        console.log('withdrawals data:', data);
+        setWithdrawals(data);
+      } else {
+        const errText = await wRes.text().catch(() => '');
+        console.error('withdrawals error:', wRes.status, errText);
+      }
+    } catch (e) { console.error('withdrawals fetch error:', e); }
+
     setLoading(false);
   }
 
   async function fetchWithdrawals() {
-    const url = filterStatus
-      ? `${API}/api/admin/withdrawals?status=${filterStatus}`
-      : `${API}/api/admin/withdrawals`;
-    const res = await fetch(url, { headers: authHeaders() });
-    if (res.ok) setWithdrawals(await res.json());
+    try {
+      const url = filterStatus
+        ? `${API}/api/admin/withdrawals?status=${filterStatus}`
+        : `${API}/api/admin/withdrawals`;
+      const res = await fetch(url, { headers: authHeaders() });
+      console.log('fetchWithdrawals status:', res.status);
+      if (res.ok) {
+        const data = await res.json();
+        console.log('fetchWithdrawals data:', data);
+        setWithdrawals(data);
+      }
+    } catch (e) { console.error('fetchWithdrawals error:', e); }
   }
 
   useEffect(() => { fetchWithdrawals(); }, [filterStatus]);
@@ -171,7 +203,7 @@ export default function ReferralPage() {
             <div className="space-y-2">
               {topReferrers.map((r, i) => (
                 <div key={i} className="flex items-center gap-3 py-2 border-b last:border-0">
-                  <span className="text-lg">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i+1}.`}</span>
+                  <span className="text-lg">{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`}</span>
                   <div className="flex-1 min-w-0">
                     <p className="font-medium text-sm truncate">{r.first_name} {r.username ? `@${r.username}` : ''}</p>
                     <p className="text-xs text-gray-400">{r.referral_count} referral · Rp {Number(r.total_earned).toLocaleString('id-ID')}</p>

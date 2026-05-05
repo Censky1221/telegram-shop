@@ -1,7 +1,7 @@
 const express = require('express');
-const bcrypt  = require('bcrypt');
-const jwt     = require('jsonwebtoken');
-const router  = express.Router();
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const router = express.Router();
 const { pool } = require('../../db/pool');
 
 // ── Auth Middleware ───────────────────────────────────────────────
@@ -66,7 +66,7 @@ router.post('/register', async (req, res) => {
 // ── Products ──────────────────────────────────────────────────────
 router.get('/products', authMiddleware, async (req, res) => {
   const { rows } = await pool.query(
-  `SELECT p.*,
+    `SELECT p.*,
           COUNT(s.id) FILTER (WHERE s.status='available') AS available,
           COUNT(s.id) FILTER (WHERE s.status='sold') AS sold
    FROM products p
@@ -74,8 +74,8 @@ router.get('/products', authMiddleware, async (req, res) => {
    WHERE p.tenant_id=$1
    GROUP BY p.id
    ORDER BY p.name ASC`,
-  [req.admin.tenant_id]
-);
+    [req.admin.tenant_id]
+  );
   res.json(rows);
 });
 
@@ -184,11 +184,11 @@ router.put('/variants/:id', authMiddleware, async (req, res) => {
   try {
     const fields = [], values = [];
     let idx = 1;
-    if (name        !== undefined) { fields.push(`name=$${idx++}`);        values.push(name); }
+    if (name !== undefined) { fields.push(`name=$${idx++}`); values.push(name); }
     if (description !== undefined) { fields.push(`description=$${idx++}`); values.push(description); }
-    if (price       !== undefined) { fields.push(`price=$${idx++}`);       values.push(price); }
-    if (is_active   !== undefined) { fields.push(`is_active=$${idx++}`);   values.push(is_active); }
-    if (terms       !== undefined) { fields.push(`terms=$${idx++}`);       values.push(terms); }
+    if (price !== undefined) { fields.push(`price=$${idx++}`); values.push(price); }
+    if (is_active !== undefined) { fields.push(`is_active=$${idx++}`); values.push(is_active); }
+    if (terms !== undefined) { fields.push(`terms=$${idx++}`); values.push(terms); }
     if (!fields.length) return res.status(400).json({ error: 'No fields to update' });
     values.push(req.params.id, req.admin.tenant_id);
     const { rows: [v] } = await pool.query(
@@ -218,10 +218,10 @@ router.get('/stocks/:productId', authMiddleware, async (req, res) => {
   try {
     let query, params;
     if (variantId) {
-      query  = `SELECT id, email, password, content, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
+      query = `SELECT id, email, password, content, status, created_at FROM stocks WHERE variant_id=$1 AND tenant_id=$2 ORDER BY id DESC`;
       params = [variantId, req.admin.tenant_id];
     } else {
-      query  = `SELECT id, email, password, content, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
+      query = `SELECT id, email, password, content, status, created_at FROM stocks WHERE product_id=$1 AND variant_id IS NULL AND tenant_id=$2 ORDER BY id DESC`;
       params = [req.params.productId, req.admin.tenant_id];
     }
     const { rows } = await pool.query(query, params);
@@ -510,15 +510,15 @@ router.get('/stats', authMiddleware, async (req, res) => {
     ]);
 
     res.json({
-      revenue_today  : revToday.rows[0].total,
-      revenue_week   : revWeek.rows[0].total,
-      revenue_month  : revMonth.rows[0].total,
-      orders_paid    : ordersPaid.rows[0].cnt,
-      orders_pending : ordersPending.rows[0].cnt,
-      users_total    : usersTotal.rows[0].cnt,
-      users_new_week : usersNewWeek.rows[0].cnt,
-      top_products   : topProducts.rows,
-      daily_chart    : dailyChart.rows,
+      revenue_today: revToday.rows[0].total,
+      revenue_week: revWeek.rows[0].total,
+      revenue_month: revMonth.rows[0].total,
+      orders_paid: ordersPaid.rows[0].cnt,
+      orders_pending: ordersPending.rows[0].cnt,
+      users_total: usersTotal.rows[0].cnt,
+      users_new_week: usersNewWeek.rows[0].cnt,
+      top_products: topProducts.rows,
+      daily_chart: dailyChart.rows,
     });
   } catch (err) {
     console.error('stats error:', err);
@@ -557,12 +557,12 @@ router.put('/vouchers/:id', authMiddleware, async (req, res) => {
   try {
     const fields = [], values = [];
     let idx = 1;
-    if (code         !== undefined) { fields.push(`code=$${idx++}`);         values.push(code?.toUpperCase()); }
-    if (type         !== undefined) { fields.push(`type=$${idx++}`);         values.push(type); }
-    if (value        !== undefined) { fields.push(`value=$${idx++}`);        values.push(value); }
+    if (code !== undefined) { fields.push(`code=$${idx++}`); values.push(code?.toUpperCase()); }
+    if (type !== undefined) { fields.push(`type=$${idx++}`); values.push(type); }
+    if (value !== undefined) { fields.push(`value=$${idx++}`); values.push(value); }
     if (max_per_user !== undefined) { fields.push(`max_per_user=$${idx++}`); values.push(max_per_user); }
-    if (expired_at   !== undefined) { fields.push(`expired_at=$${idx++}`);   values.push(expired_at || null); }
-    if (is_active    !== undefined) { fields.push(`is_active=$${idx++}`);    values.push(is_active); }
+    if (expired_at !== undefined) { fields.push(`expired_at=$${idx++}`); values.push(expired_at || null); }
+    if (is_active !== undefined) { fields.push(`is_active=$${idx++}`); values.push(is_active); }
     if (!fields.length) return res.status(400).json({ error: 'No fields' });
     values.push(req.params.id, req.admin.tenant_id);
     const { rows: [v] } = await pool.query(
@@ -882,7 +882,7 @@ router.get('/withdrawals', authMiddleware, async (req, res) => {
 // PUT update withdrawal status (approve/reject/paid)
 router.put('/withdrawals/:id', authMiddleware, async (req, res) => {
   const { status, admin_note } = req.body;
-  if (!['approved','paid','rejected'].includes(status))
+  if (!['approved', 'paid', 'rejected'].includes(status))
     return res.status(400).json({ error: 'Status tidak valid' });
 
   try {
@@ -921,10 +921,10 @@ router.put('/withdrawals/:id', authMiddleware, async (req, res) => {
             paid: `💰 *Saldo Berhasil Ditransfer!*\n\nRp ${Number(wr.amount).toLocaleString('id-ID')} sudah dikirim ke:\n🏦 ${wr.method} · ${wr.account_info}\n👤 ${wr.account_name}` + (admin_note ? `\n\n📝 Catatan: ${admin_note}` : ''),
             rejected: `❌ *Penarikan Ditolak*\n\nPermintaan #${wr.id} ditolak.` + (admin_note ? `\nAlasan: ${admin_note}` : '') + `\n\n💳 Saldo sebesar Rp ${Number(wr.amount).toLocaleString('id-ID')} telah dikembalikan.`,
           };
-          await bot.telegram.sendMessage(user.telegram_id, msgs[status], { parse_mode: 'Markdown' }).catch(() => {});
+          await bot.telegram.sendMessage(user.telegram_id, msgs[status], { parse_mode: 'Markdown' }).catch(() => { });
         }
       }
-    } catch {}
+    } catch { }
 
     res.json(updated);
   } catch (err) { res.status(500).json({ error: err.message }); }
