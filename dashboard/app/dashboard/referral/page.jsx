@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 const API = process.env.NEXT_PUBLIC_API_URL || '';
 const authHeaders = () => ({
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('admin_token')}`,
+  Authorization: `Bearer ${localStorage.getItem('token')}`,
 });
 
 const STATUS_LABEL = { pending: '⏳ Pending', approved: '✅ Disetujui', paid: '💰 Lunas', rejected: '❌ Ditolak' };
