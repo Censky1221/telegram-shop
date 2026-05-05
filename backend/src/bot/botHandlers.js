@@ -184,16 +184,49 @@ module.exports = function registerHandlers(bot, tenant) {
       const totalVotes = options.reduce((s, o) => s + parseInt(o.vote_count || 0), 0);
       const chosen     = options.find(o => o.id === optionId);
 
-      const text = buildVoteText(vote, options, totalVotes) +
+      // ── Update pesan voter saat ini ────────────────────────
+      const voterText = buildVoteText(vote, options, totalVotes) +
         `\n\n✅ *Suaramu telah dicatat!*\nKamu memilih: *${chosen?.emoji || ''} ${chosen?.label || ''}*`;
+      await ctx.editMessageText(voterText, { parse_mode: 'Markdown' }).catch(() => {});
 
-      await ctx.editMessageText(text, { parse_mode: 'Markdown' }).catch(() => {});
+      // ── Update SEMUA pesan broadcast lainnya (real-time) ───
+      const resultsText = buildVoteText(vote, options, totalVotes) +
+        `\n\n👇 *Ketuk pilihan untuk memberikan suaramu:*`;
+
+      // Tombol pilihan (tetap tampil untuk yang belum vote)
+      const voteButtons = options.map(opt => [
+        Markup.button.callback(
+          `${opt.emoji || ''} ${opt.label}`.trim(),
+          `do_vote_${vote.id}_${opt.id}`
+        )
+      ]);
+      const keyboard = Markup.inlineKeyboard(voteButtons);
+
+      // Ambil semua broadcast message kecuali milik voter saat ini
+      const { rows: broadcasts } = await pool.query(
+        `SELECT telegram_id, message_id FROM vote_broadcasts
+         WHERE vote_id=$1 AND tenant_id=$2 AND telegram_id != $3`,
+        [voteId, tenantId, voterKey]
+      );
+
+      for (const bc of broadcasts) {
+        try {
+          await bot.telegram.editMessageText(
+            bc.telegram_id,
+            bc.message_id,
+            null,
+            resultsText,
+            { parse_mode: 'Markdown', ...keyboard }
+          );
+        } catch { /* user mungkin hapus pesan, abaikan */ }
+      }
 
     } catch (err) {
       console.error('do_vote error:', err);
       ctx.answerCbQuery('Gagal memproses suara.', { show_alert: true });
     }
   });
+
 
   // ── Daftar Produk ─────────────────────────────────────────
 

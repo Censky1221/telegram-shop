@@ -706,7 +706,7 @@ router.post('/votes', authMiddleware, async (req, res) => {
   }
 });
 
-// Helper: kirim vote ke semua user bot
+// Helper: kirim vote ke semua user bot + simpan message_id
 async function broadcastVoteToUsers(vote, options, tenantId) {
   const { getBotByTenantId } = require('../../bot/tenantManager');
   const bot = getBotByTenantId(tenantId);
@@ -743,10 +743,16 @@ async function broadcastVoteToUsers(vote, options, tenantId) {
   let sent = 0, failed = 0;
   for (const user of users) {
     try {
-      await bot.telegram.sendMessage(user.telegram_id, text, {
+      const sent_msg = await bot.telegram.sendMessage(user.telegram_id, text, {
         parse_mode: 'Markdown',
         ...keyboard,
       });
+      // Simpan message_id untuk update real-time nanti
+      await pool.query(
+        `INSERT INTO vote_broadcasts (vote_id, tenant_id, telegram_id, message_id)
+         VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+        [vote.id, tenantId, user.telegram_id, sent_msg.message_id]
+      );
       sent++;
     } catch { failed++; }
   }
