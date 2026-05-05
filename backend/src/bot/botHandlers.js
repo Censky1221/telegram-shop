@@ -11,7 +11,7 @@ const PAKASIR_URL    = 'https://app.pakasir.com/api';
 const MAIN_KEYBOARD = Markup.keyboard([
   ['🛍 Daftar Produk', '💰 Saldo Saya'],
   ['📦 Pesanan Saya',  '🎟️ Voucher'],
-  ['🗳️ Vote',          '📞 Bantuan'],
+  ['📞 Bantuan'],
 ]).resize();
 
 module.exports = function registerHandlers(bot, tenant) {

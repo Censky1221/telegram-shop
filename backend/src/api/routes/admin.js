@@ -671,29 +671,88 @@ router.get('/votes/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Create vote
+// Create vote + auto-broadcast ke semua user
 router.post('/votes', authMiddleware, async (req, res) => {
   const { title, description, is_multiple, ended_at, options } = req.body;
   if (!title) return res.status(400).json({ error: 'Title wajib diisi' });
   if (!options || options.length < 2) return res.status(400).json({ error: 'Minimal 2 pilihan' });
   try {
+    // 1. Simpan vote ke DB
     const { rows: [vote] } = await pool.query(
       `INSERT INTO votes (tenant_id, title, description, is_multiple, ended_at)
        VALUES ($1,$2,$3,$4,$5) RETURNING *`,
       [req.admin.tenant_id, title, description || null, is_multiple || false, ended_at || null]
     );
+    const savedOptions = [];
     for (let i = 0; i < options.length; i++) {
       const opt = options[i];
-      await pool.query(
-        `INSERT INTO vote_options (vote_id, label, emoji, sort_order) VALUES ($1,$2,$3,$4)`,
+      const { rows: [savedOpt] } = await pool.query(
+        `INSERT INTO vote_options (vote_id, label, emoji, sort_order) VALUES ($1,$2,$3,$4) RETURNING *`,
         [vote.id, opt.label, opt.emoji || '', i]
       );
+      savedOptions.push(savedOpt);
     }
+
+    // 2. Respond dulu supaya dashboard tidak menunggu broadcast
     res.status(201).json(vote);
+
+    // 3. Broadcast ke semua user secara async (non-blocking)
+    broadcastVoteToUsers(vote, savedOptions, req.admin.tenant_id).catch(err =>
+      console.warn('broadcast vote error:', err.message)
+    );
+
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Helper: kirim vote ke semua user bot
+async function broadcastVoteToUsers(vote, options, tenantId) {
+  const { getBotByTenantId } = require('../../bot/tenantManager');
+  const bot = getBotByTenantId(tenantId);
+  if (!bot) return;
+
+  const { rows: users } = await pool.query(
+    `SELECT telegram_id FROM users WHERE tenant_id=$1`, [tenantId]
+  );
+  if (!users.length) return;
+
+  // Susun teks vote
+  let text = `🗳️ *Polling Baru!*\n\n*${vote.title}*\n`;
+  if (vote.description) text += `\n📝 ${vote.description}\n`;
+  text += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+  for (const opt of options) {
+    text += `\n${opt.emoji || '▪️'} ${opt.label}`;
+  }
+  text += `\n━━━━━━━━━━━━━━━━━━━━`;
+  if (vote.ended_at) {
+    text += `\n⏰ Berakhir: ${new Date(vote.ended_at).toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' })} WIB`;
+  }
+  text += `\n\n👇 *Ketuk pilihan untuk memberikan suaramu:*`;
+
+  // Tombol inline untuk setiap opsi
+  const { Markup } = require('telegraf');
+  const buttons = options.map(opt => [
+    Markup.button.callback(
+      `${opt.emoji || ''} ${opt.label}`.trim(),
+      `do_vote_${vote.id}_${opt.id}`
+    )
+  ]);
+  const keyboard = Markup.inlineKeyboard(buttons);
+
+  let sent = 0, failed = 0;
+  for (const user of users) {
+    try {
+      await bot.telegram.sendMessage(user.telegram_id, text, {
+        parse_mode: 'Markdown',
+        ...keyboard,
+      });
+      sent++;
+    } catch { failed++; }
+  }
+  console.log(`📢 Vote broadcast: ${sent} sent, ${failed} failed`);
+}
+
 
 // Update vote (title, description, active status, deadline)
 router.put('/votes/:id', authMiddleware, async (req, res) => {
