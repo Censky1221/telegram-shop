@@ -153,15 +153,27 @@ export default function ReferralPage() {
         <div className="bg-white rounded-2xl shadow p-5">
           <h2 className="font-semibold text-base mb-4">⚙️ Pengaturan Referral</h2>
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-gray-700">Status Program</label>
+            <div className="flex items-center justify-between p-3 rounded-xl border-2 transition-colors"
+              style={{ borderColor: settings.is_active ? '#22c55e' : '#e5e7eb', background: settings.is_active ? '#f0fdf4' : '#f9fafb' }}>
+              <div>
+                <p className="text-sm font-semibold text-gray-700">Status Program</p>
+                <p className={`text-xs font-bold mt-0.5 ${settings.is_active ? 'text-green-600' : 'text-gray-400'}`}>
+                  {settings.is_active ? '🟢 AKTIF — Referral sedang berjalan' : '⚫ NONAKTIF — Referral dimatikan'}
+                </p>
+              </div>
               <button
                 onClick={() => setSettings(s => ({ ...s, is_active: !s.is_active }))}
-                className={`relative w-12 h-6 rounded-full transition-colors ${settings.is_active ? 'bg-green-500' : 'bg-gray-300'}`}
+                className={`relative flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all shadow-sm ${
+                  settings.is_active
+                    ? 'bg-green-500 hover:bg-green-600 text-white'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-500'
+                }`}
               >
-                <span className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform ${settings.is_active ? 'translate-x-7' : 'translate-x-1'}`} />
+                <span className={`w-3 h-3 rounded-full bg-white opacity-90`} />
+                {settings.is_active ? 'ON' : 'OFF'}
               </button>
             </div>
+
 
             <div>
               <label className="block text-xs text-gray-500 mb-1">Bonus per Referral (Rp)</label>
