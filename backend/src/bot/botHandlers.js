@@ -2,16 +2,18 @@ const { Markup } = require('telegraf');
 const axios      = require('axios');
 const { pool }   = require('../db/pool');
 const QRCode     = require('qrcode');
+const { ensureReferralCode, checkAndAwardReferral } = require('../services/referralService');
 
-const userProductMap = {};
-const userCart       = {};
-const userVoucherMap = {};
-const PAKASIR_URL    = 'https://app.pakasir.com/api';
+const userProductMap  = {};
+const userCart        = {};
+const userVoucherMap  = {};
+const userWithdrawMap = {}; // state mesin penarikan saldo
+const PAKASIR_URL     = 'https://app.pakasir.com/api';
 
 const MAIN_KEYBOARD = Markup.keyboard([
   ['🛍 Daftar Produk', '💰 Saldo Saya'],
   ['📦 Pesanan Saya',  '🎟️ Voucher'],
-  ['📞 Bantuan'],
+  ['💎 Referral',      '📞 Bantuan'],
 ]).resize();
 
 module.exports = function registerHandlers(bot, tenant) {
@@ -22,14 +24,33 @@ module.exports = function registerHandlers(bot, tenant) {
     const telegramId = ctx.from.id.toString();
     const username   = ctx.from.username || null;
     const firstName  = ctx.from.first_name || 'User';
+    const refCode    = ctx.startPayload || null; // kode referral dari link
     try {
-      await pool.query(
+      const { rows: [upserted] } = await pool.query(
         `INSERT INTO users (telegram_id, username, first_name, balance, tenant_id)
          VALUES ($1,$2,$3,0,$4)
          ON CONFLICT (telegram_id, tenant_id) DO UPDATE
-           SET username=EXCLUDED.username, first_name=EXCLUDED.first_name`,
+           SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
+         RETURNING id, referred_by`,
         [telegramId, username, firstName, tenantId]
       );
+
+      // Pastikan user punya referral_code
+      await ensureReferralCode(upserted.id);
+
+      // Proses referral jika ada refCode dan user belum punya referred_by
+      if (refCode && !upserted.referred_by) {
+        const { rows: [referrer] } = await pool.query(
+          `SELECT id FROM users WHERE referral_code=$1 AND tenant_id=$2`,
+          [refCode, tenantId]
+        );
+        if (referrer && referrer.id !== upserted.id) {
+          await pool.query(
+            `UPDATE users SET referred_by=$1 WHERE id=$2 AND referred_by IS NULL`,
+            [referrer.id, upserted.id]
+          );
+        }
+      }
     } catch (err) { console.error('start insert error:', err.message); }
     await ctx.reply(
       `🏪 *Selamat datang di ${tenant.name}!*\n\n👤 Halo, *${firstName}*!\n\nPilih menu di bawah untuk mulai berbelanja. 🛍`,
@@ -62,7 +83,287 @@ module.exports = function registerHandlers(bot, tenant) {
     } catch { ctx.reply('Gagal memuat bantuan.'); }
   });
 
-  // ── 🗳️ Vote — Tampilkan daftar vote aktif ────────────────
+  // ── 💎 Referral — Info & tarik saldo ─────────────────────
+  bot.hears('💎 Referral', async (ctx) => {
+    const telegramId = ctx.from.id.toString();
+    try {
+      const { rows: [user] } = await pool.query(
+        `SELECT id, balance, referral_code FROM users WHERE telegram_id=$1 AND tenant_id=$2`,
+        [telegramId, tenantId]
+      );
+      if (!user) return ctx.reply('Silakan kirim /start terlebih dahulu.');
+
+      // Pastikan punya referral code
+      const code = user.referral_code || await ensureReferralCode(user.id);
+
+      // Statistik referral
+      const { rows: [stats] } = await pool.query(
+        `SELECT COUNT(*) AS total, COALESCE(SUM(bonus_amount),0) AS total_bonus
+         FROM referrals WHERE referrer_id=$1 AND tenant_id=$2`,
+        [user.id, tenantId]
+      );
+
+      // Ambil setting min withdraw
+      const { rows: [settings] } = await pool.query(
+        `SELECT bonus_amount, min_withdraw FROM referral_settings WHERE tenant_id=$1`, [tenantId]
+      );
+      const bonusPerRef  = settings?.bonus_amount || 500;
+      const minWithdraw  = settings?.min_withdraw || 10000;
+      const balance      = Number(user.balance || 0);
+
+      // Bot username untuk link
+      const botInfo = await bot.telegram.getMe().catch(() => null);
+      const botUsername = botInfo?.username || 'bot';
+      const refLink = `https://t.me/${botUsername}?start=${code}`;
+
+      let text = `💎 *Program Referral*\n\n`;
+      text += `🔗 *Kode Referral kamu:* \`${code}\`\n`;
+      text += `📎 *Link:* \`${refLink}\`\n\n`;
+      text += `━━━━━━━━━━━━━━━━━━━━\n`;
+      text += `👥 Total teman diajak: *${stats.total}*\n`;
+      text += `💰 Total bonus diterima: *Rp ${Number(stats.total_bonus).toLocaleString('id-ID')}*\n`;
+      text += `💵 Bonus per referral: *Rp ${Number(bonusPerRef).toLocaleString('id-ID')}*\n`;
+      text += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+      text += `💳 Saldo kamu: *Rp ${balance.toLocaleString('id-ID')}*\n`;
+      text += `_(Min. tarik: Rp ${Number(minWithdraw).toLocaleString('id-ID')})_\n\n`;
+      text += `📢 Bagikan link referral kamu! Setiap teman yang beli pertama kali, kamu dapat bonus saldo otomatis! 🎉`;
+
+      const buttons = [];
+      if (balance >= minWithdraw) {
+        buttons.push([Markup.button.callback('💸 Tarik Saldo', 'withdraw_start')]);
+      }
+      buttons.push([Markup.button.callback('📋 Cek Status Penarikan', 'withdraw_status')]);
+
+      await ctx.reply(text, {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(buttons),
+      });
+    } catch (err) {
+      console.error('referral info error:', err);
+      ctx.reply('Gagal memuat info referral.');
+    }
+  });
+
+  // ── 💸 Mulai proses tarik saldo ──────────────────────────
+  bot.action('withdraw_start', async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const telegramId = ctx.from.id.toString();
+    const wKey = `${tenantId}_${telegramId}`;
+
+    const { rows: [user] } = await pool.query(
+      `SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2`,
+      [telegramId, tenantId]
+    );
+    if (!user) return;
+
+    const { rows: [settings] } = await pool.query(
+      `SELECT min_withdraw FROM referral_settings WHERE tenant_id=$1`, [tenantId]
+    );
+    const minWithdraw = settings?.min_withdraw || 10000;
+
+    userWithdrawMap[wKey] = { step: 'amount', userId: user.id, balance: Number(user.balance || 0), minWithdraw };
+
+    await ctx.reply(
+      `💸 *Tarik Saldo*\n\n` +
+      `💳 Saldo kamu: *Rp ${Number(user.balance || 0).toLocaleString('id-ID')}*\n` +
+      `📌 Minimum tarik: *Rp ${Number(minWithdraw).toLocaleString('id-ID')}*\n\n` +
+      `Ketik jumlah yang ingin ditarik:\n_(ketik "batal" untuk membatalkan)_`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  // ── 📋 Cek status penarikan ──────────────────────────────
+  bot.action('withdraw_status', async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const telegramId = ctx.from.id.toString();
+    try {
+      const { rows: [user] } = await pool.query(
+        `SELECT id FROM users WHERE telegram_id=$1 AND tenant_id=$2`, [telegramId, tenantId]
+      );
+      if (!user) return;
+
+      const { rows: reqs } = await pool.query(
+        `SELECT * FROM withdrawal_requests WHERE user_id=$1 AND tenant_id=$2
+         ORDER BY created_at DESC LIMIT 5`,
+        [user.id, tenantId]
+      );
+
+      if (!reqs.length) return ctx.reply('📋 Belum ada riwayat penarikan saldo.');
+
+      const statusEmoji = { pending: '⏳', approved: '✅', paid: '💰', rejected: '❌' };
+      const list = reqs.map(r =>
+        `${statusEmoji[r.status] || '❓'} *Rp ${Number(r.amount).toLocaleString('id-ID')}*\n` +
+        `   ${r.method} · ${r.account_info}\n` +
+        `   ${new Date(r.created_at).toLocaleDateString('id-ID')} · _${r.status}_` +
+        (r.admin_note ? `\n   📝 ${r.admin_note}` : '')
+      ).join('\n\n');
+
+      await ctx.reply(`📋 *Riwayat Penarikan (5 terakhir)*\n\n${list}`, { parse_mode: 'Markdown' });
+    } catch (err) { ctx.reply('Gagal memuat riwayat.'); }
+  });
+
+  // ── Text handler untuk withdrawal flow ────────────────────
+  // HARUS sebelum voucher handler
+  bot.on('text', async (ctx, next) => {
+    const text = ctx.message.text;
+    const wKey = `${tenantId}_${ctx.from.id}`;
+    const state = userWithdrawMap[wKey];
+    if (!state) return next();
+
+    if (text.toLowerCase() === 'batal') {
+      delete userWithdrawMap[wKey];
+      return ctx.reply('❌ Penarikan dibatalkan.', MAIN_KEYBOARD);
+    }
+
+    // STEP 1: input jumlah
+    if (state.step === 'amount') {
+      const amount = parseInt(text.replace(/[^0-9]/g, ''));
+      if (isNaN(amount) || amount < state.minWithdraw) {
+        return ctx.reply(`❌ Jumlah minimal Rp ${Number(state.minWithdraw).toLocaleString('id-ID')}. Coba lagi:`);
+      }
+      if (amount > state.balance) {
+        return ctx.reply(`❌ Saldo tidak cukup. Saldo kamu: Rp ${Number(state.balance).toLocaleString('id-ID')}`);
+      }
+      userWithdrawMap[wKey] = { ...state, step: 'method', amount };
+      return ctx.reply(
+        `💳 *Pilih Metode Penarikan*\n\nJumlah: *Rp ${Number(amount).toLocaleString('id-ID')}*\n\nPilih metode transfer:`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🏦 BCA', 'wm_BCA'), Markup.button.callback('🏦 BRI', 'wm_BRI')],
+            [Markup.button.callback('🏦 Mandiri', 'wm_Mandiri'), Markup.button.callback('🏦 BNI', 'wm_BNI')],
+            [Markup.button.callback('💚 GoPay', 'wm_GoPay'), Markup.button.callback('💜 OVO', 'wm_OVO')],
+            [Markup.button.callback('🔵 Dana', 'wm_Dana'), Markup.button.callback('❌ Batal', 'wm_cancel')],
+          ]),
+        }
+      );
+    }
+
+    // STEP 2: input nomor rekening/ewallet
+    if (state.step === 'account') {
+      userWithdrawMap[wKey] = { ...state, step: 'name', account: text };
+      return ctx.reply(
+        `👤 Masukkan *nama pemilik* rekening/e-wallet:\n_(ketik "batal" untuk membatalkan)_`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+    // STEP 3: input nama pemilik → konfirmasi
+    if (state.step === 'name') {
+      userWithdrawMap[wKey] = { ...state, step: 'confirm', accountName: text };
+      const s = userWithdrawMap[wKey];
+      return ctx.reply(
+        `✅ *Konfirmasi Penarikan*\n\n` +
+        `💰 Jumlah: *Rp ${Number(s.amount).toLocaleString('id-ID')}*\n` +
+        `🏦 Metode: *${s.method}*\n` +
+        `📱 Nomor/Akun: *${s.account}*\n` +
+        `👤 Nama: *${s.accountName}*\n\n` +
+        `Lanjutkan penarikan?`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Ya, Tarik Sekarang', 'withdraw_confirm')],
+            [Markup.button.callback('❌ Batal', 'wm_cancel')],
+          ]),
+        }
+      );
+    }
+
+    return next();
+  });
+
+  // ── Pilih metode withdrawal ───────────────────────────────
+  bot.action(/^wm_(.+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const method = ctx.match[1];
+    const wKey   = `${tenantId}_${ctx.from.id}`;
+    if (method === 'cancel') {
+      delete userWithdrawMap[wKey];
+      await ctx.editMessageText('❌ Penarikan dibatalkan.').catch(() => {});
+      return;
+    }
+    if (!userWithdrawMap[wKey]) return;
+    userWithdrawMap[wKey] = { ...userWithdrawMap[wKey], step: 'account', method };
+    await ctx.editMessageText(
+      `🏦 Metode dipilih: *${method}*\n\nMasukkan *nomor rekening / nomor ${method}*:\n_(ketik "batal" untuk membatalkan)_`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {});
+  });
+
+  // ── Konfirmasi tarik saldo ────────────────────────────────
+  bot.action('withdraw_confirm', async (ctx) => {
+    try { await ctx.answerCbQuery('Memproses...'); } catch {}
+    const wKey = `${tenantId}_${ctx.from.id}`;
+    const state = userWithdrawMap[wKey];
+    if (!state || state.step !== 'confirm') return;
+    delete userWithdrawMap[wKey];
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Lock dan cek saldo
+      const { rows: [user] } = await client.query(
+        `SELECT id, balance FROM users WHERE telegram_id=$1 AND tenant_id=$2 FOR UPDATE`,
+        [ctx.from.id.toString(), tenantId]
+      );
+      if (!user || Number(user.balance) < state.amount) {
+        await client.query('ROLLBACK');
+        return ctx.editMessageText('❌ Saldo tidak cukup.').catch(() => {});
+      }
+
+      // Kurangi saldo
+      await client.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [state.amount, user.id]);
+
+      // Buat withdrawal request
+      const { rows: [req] } = await client.query(
+        `INSERT INTO withdrawal_requests (tenant_id, user_id, amount, method, account_info, account_name)
+         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+        [tenantId, user.id, state.amount, state.method, state.account, state.accountName]
+      );
+
+      await client.query('COMMIT');
+
+      await ctx.editMessageText(
+        `✅ *Permintaan Tarik Saldo Dikirim!*\n\n` +
+        `📋 ID: *#${req.id}*\n` +
+        `💰 Jumlah: *Rp ${Number(state.amount).toLocaleString('id-ID')}*\n` +
+        `🏦 Ke: *${state.method}* · ${state.account}\n` +
+        `👤 Nama: *${state.accountName}*\n\n` +
+        `⏳ Admin akan memproses dalam 1x24 jam.\n` +
+        `Pantau status di menu 💎 Referral → Cek Status Penarikan.`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => {});
+
+      // Notif admin
+      const { rows: [adminNotif] } = await pool.query(
+        `SELECT notification_chat_id FROM tenants WHERE id=$1`, [tenantId]
+      ).catch(() => ({ rows: [null] }));
+      if (adminNotif?.notification_chat_id) {
+        await bot.telegram.sendMessage(
+          adminNotif.notification_chat_id,
+          `💸 *Permintaan Tarik Saldo Baru!*\n\n` +
+          `📋 ID: #${req.id}\n` +
+          `👤 User: ${ctx.from.first_name} (@${ctx.from.username || '-'})\n` +
+          `💰 Jumlah: Rp ${Number(state.amount).toLocaleString('id-ID')}\n` +
+          `🏦 Metode: ${state.method}\n` +
+          `📱 Rekening: ${state.account}\n` +
+          `👤 Nama: ${state.accountName}\n\n` +
+          `Proses di Dashboard → Referral`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {});
+      }
+
+    } catch (err) {
+      await client.query('ROLLBACK');
+      console.error('withdraw_confirm error:', err);
+      ctx.editMessageText('❌ Terjadi kesalahan, coba lagi.').catch(() => {});
+    } finally {
+      client.release();
+    }
+  });
+
+
   bot.hears('🗳️ Vote', async (ctx) => {
     try {
       const { rows: votes } = await pool.query(
@@ -526,6 +827,7 @@ module.exports = function registerHandlers(bot, tenant) {
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${variant.product_name} - ${variant.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
       await assignStockAndDeliver(order, tenantId);
+      await checkAndAwardReferral(user.id, tenantId, order.id, bot);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_v error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
   });
@@ -575,9 +877,11 @@ module.exports = function registerHandlers(bot, tenant) {
       await ctx.editMessageText(`✅ *Pembayaran Berhasil!*\n\n📦 ${product.name} x${qty}\n💰 Total: *Rp ${Number(total).toLocaleString('id-ID')}*\n\n📨 Akun sedang dikirim...`, { parse_mode: 'Markdown' }).catch(() => {});
       const { assignStockAndDeliver } = require('../services/stockService');
       await assignStockAndDeliver(order, tenantId);
+      await checkAndAwardReferral(user.id, tenantId, order.id, bot);
     } catch (err) { await client.query('ROLLBACK'); console.error('confirm_saldo_p error:', err); ctx.editMessageText('❌ Terjadi kesalahan.').catch(() => {}); }
     finally { client.release(); }
   });
+
 
   // ── QRIS varian ───────────────────────────────────────────
   bot.action(/^pay_qris_v_(\d+)_(\d+)(?:_(\d+)_(\d+))?$/, async (ctx) => {
