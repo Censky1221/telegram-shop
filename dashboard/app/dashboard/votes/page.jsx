@@ -128,12 +128,23 @@ export default function VotesPage() {
     <div>
       <div className="flex items-center justify-between mb-1">
         <h1 className="text-xl md:text-2xl font-semibold">🗳️ Vote & Polling</h1>
-        <button
-          onClick={() => setShowForm(v => !v)}
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition flex items-center gap-1"
-        >
-          {showForm ? '✕ Tutup' : '+ Buat Vote'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={fetchVotes}
+            disabled={loading}
+            className="border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-600 text-sm px-3 py-2 rounded-lg transition flex items-center gap-1"
+            title="Refresh data"
+          >
+            <span className={loading ? 'animate-spin inline-block' : ''}>🔄</span>
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+          <button
+            onClick={() => setShowForm(v => !v)}
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg transition flex items-center gap-1"
+          >
+            {showForm ? '✕ Tutup' : '+ Buat Vote'}
+          </button>
+        </div>
       </div>
       <p className="text-gray-500 text-sm mb-6">Buat polling & lihat hasil suara secara real-time.</p>
 
