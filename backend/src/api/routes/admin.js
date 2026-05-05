@@ -605,4 +605,131 @@ router.post('/vouchers/validate', authMiddleware, async (req, res) => {
   }
 });
 
+// ── Votes ─────────────────────────────────────────────────────────
+// List all votes
+router.get('/votes', authMiddleware, async (req, res) => {
+  try {
+    const { rows: votes } = await pool.query(
+      `SELECT v.*,
+              COUNT(DISTINCT vr.voter_key) AS total_voters
+       FROM votes v
+       LEFT JOIN vote_responses vr ON vr.vote_id = v.id
+       WHERE v.tenant_id=$1
+       GROUP BY v.id
+       ORDER BY v.created_at DESC`,
+      [req.admin.tenant_id]
+    );
+
+    // Attach options + response counts for each vote
+    for (const vote of votes) {
+      const { rows: options } = await pool.query(
+        `SELECT vo.*, COUNT(vr.id) AS vote_count
+         FROM vote_options vo
+         LEFT JOIN vote_responses vr ON vr.option_id = vo.id
+         WHERE vo.vote_id=$1
+         GROUP BY vo.id
+         ORDER BY vo.sort_order, vo.id`,
+        [vote.id]
+      );
+      vote.options = options;
+    }
+
+    res.json(votes);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single vote with results
+router.get('/votes/:id', authMiddleware, async (req, res) => {
+  try {
+    const { rows: [vote] } = await pool.query(
+      `SELECT v.*,
+              COUNT(DISTINCT vr.voter_key) AS total_voters
+       FROM votes v
+       LEFT JOIN vote_responses vr ON vr.vote_id = v.id
+       WHERE v.id=$1 AND v.tenant_id=$2
+       GROUP BY v.id`,
+      [req.params.id, req.admin.tenant_id]
+    );
+    if (!vote) return res.status(404).json({ error: 'Vote not found' });
+
+    const { rows: options } = await pool.query(
+      `SELECT vo.*, COUNT(vr.id) AS vote_count
+       FROM vote_options vo
+       LEFT JOIN vote_responses vr ON vr.option_id = vo.id
+       WHERE vo.vote_id=$1
+       GROUP BY vo.id
+       ORDER BY vo.sort_order, vo.id`,
+      [vote.id]
+    );
+    vote.options = options;
+
+    res.json(vote);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create vote
+router.post('/votes', authMiddleware, async (req, res) => {
+  const { title, description, is_multiple, ended_at, options } = req.body;
+  if (!title) return res.status(400).json({ error: 'Title wajib diisi' });
+  if (!options || options.length < 2) return res.status(400).json({ error: 'Minimal 2 pilihan' });
+  try {
+    const { rows: [vote] } = await pool.query(
+      `INSERT INTO votes (tenant_id, title, description, is_multiple, ended_at)
+       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [req.admin.tenant_id, title, description || null, is_multiple || false, ended_at || null]
+    );
+    for (let i = 0; i < options.length; i++) {
+      const opt = options[i];
+      await pool.query(
+        `INSERT INTO vote_options (vote_id, label, emoji, sort_order) VALUES ($1,$2,$3,$4)`,
+        [vote.id, opt.label, opt.emoji || '', i]
+      );
+    }
+    res.status(201).json(vote);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update vote (title, description, active status, deadline)
+router.put('/votes/:id', authMiddleware, async (req, res) => {
+  const { title, description, is_active, ended_at } = req.body;
+  try {
+    const { rows: [vote] } = await pool.query(
+      `UPDATE votes SET
+         title=$1, description=$2, is_active=$3, ended_at=$4
+       WHERE id=$5 AND tenant_id=$6 RETURNING *`,
+      [title, description || null, is_active, ended_at || null, req.params.id, req.admin.tenant_id]
+    );
+    if (!vote) return res.status(404).json({ error: 'Vote not found' });
+    res.json(vote);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete vote
+router.delete('/votes/:id', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM votes WHERE id=$1 AND tenant_id=$2`, [req.params.id, req.admin.tenant_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset vote responses
+router.delete('/votes/:id/responses', authMiddleware, async (req, res) => {
+  try {
+    await pool.query(`DELETE FROM vote_responses WHERE vote_id=$1`, [req.params.id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
