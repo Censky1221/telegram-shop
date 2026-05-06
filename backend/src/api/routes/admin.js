@@ -404,20 +404,6 @@ router.post('/users/:id/ban', authMiddleware, async (req, res) => {
       [reason || null, req.params.id, req.admin.tenant_id]
     );
     if (!user) return res.status(404).json({ error: 'User not found' });
-    // Notif ke user via bot
-    try {
-      const { getBotByTenantId } = require('../../bot/tenantManager');
-      const bot = getBotByTenantId(req.admin.tenant_id);
-      if (bot) {
-        await bot.telegram.sendMessage(
-          user.telegram_id,
-          `🚫 *Akun Kamu Telah Diblokir*\n\n` +
-          (reason ? `📝 Alasan: ${reason}\n\n` : '') +
-          `Hubungi admin jika kamu merasa ini adalah kesalahan.`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } catch (e) { console.warn('Ban notify failed:', e.message); }
     res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -434,18 +420,6 @@ router.post('/users/:id/unban', authMiddleware, async (req, res) => {
       [req.params.id, req.admin.tenant_id]
     );
     if (!user) return res.status(404).json({ error: 'User not found' });
-    // Notif ke user via bot
-    try {
-      const { getBotByTenantId } = require('../../bot/tenantManager');
-      const bot = getBotByTenantId(req.admin.tenant_id);
-      if (bot) {
-        await bot.telegram.sendMessage(
-          user.telegram_id,
-          `✅ *Akun Kamu Telah Dibuka Kembali*\n\nKamu sudah bisa berbelanja lagi. Selamat berbelanja! 🛍`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } catch (e) { console.warn('Unban notify failed:', e.message); }
     res.json({ success: true, user });
   } catch (err) {
     res.status(500).json({ error: err.message });
