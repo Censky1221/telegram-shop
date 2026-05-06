@@ -10,20 +10,15 @@ function authHeaders() {
 }
 
 export default function UsersPage() {
-  const [users, setUsers]         = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [selected, setSelected]   = useState(null);
-  const [amount, setAmount]       = useState('');
-  const [note, setNote]           = useState('');
-  const [mode, setMode]           = useState('topup'); // topup | deduct
-  const [saving, setSaving]       = useState(false);
-  const [search, setSearch]       = useState('');
-  const [msg, setMsg]             = useState('');
-
-  // Ban modal state
-  const [banModal, setBanModal]   = useState(null); // user object | null
-  const [banReason, setBanReason] = useState('');
-  const [banning, setBanning]     = useState(false);
+  const [users, setUsers]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [selected, setSelected] = useState(null);
+  const [amount, setAmount]     = useState('');
+  const [note, setNote]         = useState('');
+  const [mode, setMode]         = useState('topup'); // topup | deduct
+  const [saving, setSaving]     = useState(false);
+  const [search, setSearch]     = useState('');
+  const [msg, setMsg]           = useState('');
 
   useEffect(() => {
     const delay = setTimeout(() => { fetchUsers(); }, 300);
@@ -62,42 +57,6 @@ export default function UsersPage() {
     } finally { setSaving(false); }
   }
 
-  async function handleBan() {
-    if (!banModal) return;
-    setBanning(true);
-    try {
-      const res = await fetch(`${API}/api/admin/users/${banModal.id}/ban`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ reason: banReason }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      setBanModal(null);
-      setBanReason('');
-      fetchUsers();
-      if (selected?.id === banModal.id) setMsg('🚫 User telah diblokir.');
-    } catch (err) {
-      alert('❌ ' + err.message);
-    } finally { setBanning(false); }
-  }
-
-  async function handleUnban(user) {
-    if (!confirm(`Unban user ${user.first_name || user.username}?`)) return;
-    try {
-      const res = await fetch(`${API}/api/admin/users/${user.id}/unban`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      fetchUsers();
-      if (selected?.id === user.id) setMsg('✅ User telah di-unban.');
-    } catch (err) {
-      alert('❌ ' + err.message);
-    }
-  }
-
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-6">👤 Users & Saldo</h1>
@@ -126,22 +85,16 @@ export default function UsersPage() {
                   <th className="px-4 py-3">User</th>
                   <th className="px-4 py-3">Telegram ID</th>
                   <th className="px-4 py-3">Saldo</th>
-                  <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {users.map(u => (
                   <tr key={u.id}
-                    className={`hover:bg-gray-50 cursor-pointer transition-colors
-                      ${selected?.id === u.id ? 'bg-blue-50' : ''}
-                      ${u.is_banned ? 'opacity-60' : ''}`}
+                    className={`hover:bg-gray-50 cursor-pointer ${selected?.id === u.id ? 'bg-blue-50' : ''}`}
                     onClick={() => { setSelected(u); setMsg(''); }}>
                     <td className="px-4 py-3">
-                      <div className="font-medium flex items-center gap-1">
-                        {u.is_banned && <span title={u.ban_reason || 'Diblokir'}>🚫</span>}
-                        {u.first_name || '—'}
-                      </div>
+                      <div className="font-medium">{u.first_name || '—'}</div>
                       <div className="text-xs text-gray-400">@{u.username || 'no username'}</div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{u.telegram_id}</td>
@@ -149,42 +102,16 @@ export default function UsersPage() {
                       Rp {Number(u.balance || 0).toLocaleString('id-ID')}
                     </td>
                     <td className="px-4 py-3">
-                      {u.is_banned ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                          🚫 Banned
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                          ✅ Aktif
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2 flex-wrap">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setSelected(u); setMsg(''); }}
-                          className="text-blue-600 hover:underline text-xs">
-                          💰 Saldo
-                        </button>
-                        {u.is_banned ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleUnban(u); }}
-                            className="text-green-600 hover:underline text-xs">
-                            ✅ Unban
-                          </button>
-                        ) : (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setBanModal(u); setBanReason(''); }}
-                            className="text-red-500 hover:underline text-xs">
-                            🚫 Ban
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setSelected(u); setMsg(''); }}
+                        className="text-blue-600 hover:underline text-xs">
+                        Kelola Saldo
+                      </button>
                     </td>
                   </tr>
                 ))}
                 {!users.length && (
-                  <tr><td colSpan={5} className="px-4 py-10 text-center text-gray-400">Belum ada user.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-10 text-center text-gray-400">Belum ada user.</td></tr>
                 )}
               </tbody>
             </table>
@@ -197,42 +124,13 @@ export default function UsersPage() {
 
           {selected ? (
             <div>
-              <div className={`rounded-xl p-3 mb-4 ${selected.is_banned ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm">{selected.first_name || '—'}</p>
-                    <p className="text-xs text-gray-400">@{selected.username || 'no username'}</p>
-                    <p className="text-green-600 font-semibold mt-1">
-                      Saldo: Rp {Number(selected.balance || 0).toLocaleString('id-ID')}
-                    </p>
-                  </div>
-                  {selected.is_banned && (
-                    <span className="text-xs text-red-600 font-medium bg-red-100 px-2 py-1 rounded-full">🚫 Banned</span>
-                  )}
-                </div>
-                {selected.is_banned && selected.ban_reason && (
-                  <p className="text-xs text-red-500 mt-1">Alasan: {selected.ban_reason}</p>
-                )}
+              <div className="bg-gray-50 rounded-xl p-3 mb-4">
+                <p className="font-medium text-sm">{selected.first_name || '—'}</p>
+                <p className="text-xs text-gray-400">@{selected.username || 'no username'}</p>
+                <p className="text-green-600 font-semibold mt-1">
+                  Saldo: Rp {Number(selected.balance || 0).toLocaleString('id-ID')}
+                </p>
               </div>
-
-              {/* Ban/Unban quick action */}
-              <div className="mb-4">
-                {selected.is_banned ? (
-                  <button
-                    onClick={() => handleUnban(selected)}
-                    className="w-full py-2 text-sm rounded-lg bg-green-500 hover:bg-green-600 text-white transition">
-                    ✅ Unban User Ini
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => { setBanModal(selected); setBanReason(''); }}
-                    className="w-full py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white transition">
-                    🚫 Ban User Ini
-                  </button>
-                )}
-              </div>
-
-              <hr className="mb-4" />
 
               {/* Mode toggle */}
               <div className="flex rounded-lg border overflow-hidden mb-4 text-sm">
@@ -303,43 +201,6 @@ export default function UsersPage() {
           )}
         </div>
       </div>
-
-      {/* ── Ban Modal ─────────────────────────────────────── */}
-      {banModal && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-semibold text-red-600 mb-1">🚫 Ban User</h3>
-            <p className="text-sm text-gray-500 mb-4">
-              Memblokir <span className="font-medium text-gray-800">{banModal.first_name || banModal.username}</span> dari bot.
-              User akan mendapat notifikasi otomatis.
-            </p>
-
-            <label className="block text-sm text-gray-600 mb-1">Alasan Ban (opsional)</label>
-            <input
-              type="text"
-              className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
-              placeholder="contoh: Spam / penipuan / dll"
-              value={banReason}
-              onChange={e => setBanReason(e.target.value)}
-              autoFocus
-            />
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setBanModal(null); setBanReason(''); }}
-                className="flex-1 py-2 text-sm rounded-lg border hover:bg-gray-50 transition">
-                Batal
-              </button>
-              <button
-                onClick={handleBan}
-                disabled={banning}
-                className="flex-1 py-2 text-sm rounded-lg bg-red-500 hover:bg-red-600 text-white transition disabled:opacity-50">
-                {banning ? 'Memproses...' : '🚫 Blokir Sekarang'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

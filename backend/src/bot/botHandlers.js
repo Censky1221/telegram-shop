@@ -20,36 +20,6 @@ const MAIN_KEYBOARD = Markup.keyboard([
 module.exports = function registerHandlers(bot, tenant) {
   const tenantId = tenant.id;
 
-  // ── Ban Guard ─────────────────────────────────────────────
-  // Cek setiap update: jika user di-ban, blokir semua interaksi
-  const banNotifiedAt = {}; // rate-limit notif agar tidak spam
-  bot.use(async (ctx, next) => {
-    const telegramId = ctx.from?.id?.toString();
-    if (!telegramId) return next();
-    try {
-      const { rows: [user] } = await pool.query(
-        `SELECT is_banned, ban_reason FROM users WHERE telegram_id=$1 AND tenant_id=$2`,
-        [telegramId, tenantId]
-      );
-      if (user?.is_banned) {
-        // Kirim notif ban max 1x per 10 menit per user
-        const lastNotif = banNotifiedAt[telegramId] || 0;
-        if (Date.now() - lastNotif > 10 * 60 * 1000) {
-          banNotifiedAt[telegramId] = Date.now();
-          await ctx.reply(
-            `🚫 *Akun kamu telah diblokir.*\n\n` +
-            (user.ban_reason ? `📝 Alasan: ${user.ban_reason}\n\n` : '') +
-            `Hubungi admin jika kamu merasa ini adalah kesalahan.`,
-            { parse_mode: 'Markdown' }
-          ).catch(() => {});
-        }
-        return; // stop semua handler
-      }
-    } catch { /* abaikan error DB agar bot tetap jalan */ }
-    return next();
-  });
-
-
   // ── /start ────────────────────────────────────────────────
   bot.start(async (ctx) => {
     const telegramId = ctx.from.id.toString();
