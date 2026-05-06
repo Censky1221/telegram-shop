@@ -367,7 +367,7 @@ router.get('/users', authMiddleware, async (req, res) => {
 
   try {
     let query = `
-      SELECT id, telegram_id, username, first_name, balance, created_at
+      SELECT id, telegram_id, username, first_name, balance, is_banned, ban_reason, created_at
       FROM users
       WHERE tenant_id=$1
     `;
@@ -390,6 +390,65 @@ router.get('/users', authMiddleware, async (req, res) => {
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// ── Ban User ──────────────────────────────────────────────────────
+router.post('/users/:id/ban', authMiddleware, async (req, res) => {
+  const { reason } = req.body;
+  try {
+    const { rows: [user] } = await pool.query(
+      `UPDATE users SET is_banned=true, ban_reason=$1
+       WHERE id=$2 AND tenant_id=$3
+       RETURNING id, telegram_id, username, first_name, is_banned, ban_reason`,
+      [reason || null, req.params.id, req.admin.tenant_id]
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Notif ke user via bot
+    try {
+      const { getBotByTenantId } = require('../../bot/tenantManager');
+      const bot = getBotByTenantId(req.admin.tenant_id);
+      if (bot) {
+        await bot.telegram.sendMessage(
+          user.telegram_id,
+          `🚫 *Akun Kamu Telah Diblokir*\n\n` +
+          (reason ? `📝 Alasan: ${reason}\n\n` : '') +
+          `Hubungi admin jika kamu merasa ini adalah kesalahan.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } catch (e) { console.warn('Ban notify failed:', e.message); }
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Unban User ────────────────────────────────────────────────────
+router.post('/users/:id/unban', authMiddleware, async (req, res) => {
+  try {
+    const { rows: [user] } = await pool.query(
+      `UPDATE users SET is_banned=false, ban_reason=NULL
+       WHERE id=$1 AND tenant_id=$2
+       RETURNING id, telegram_id, username, first_name, is_banned`,
+      [req.params.id, req.admin.tenant_id]
+    );
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Notif ke user via bot
+    try {
+      const { getBotByTenantId } = require('../../bot/tenantManager');
+      const bot = getBotByTenantId(req.admin.tenant_id);
+      if (bot) {
+        await bot.telegram.sendMessage(
+          user.telegram_id,
+          `✅ *Akun Kamu Telah Dibuka Kembali*\n\nKamu sudah bisa berbelanja lagi. Selamat berbelanja! 🛍`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    } catch (e) { console.warn('Unban notify failed:', e.message); }
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
