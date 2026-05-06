@@ -3,6 +3,7 @@ const axios      = require('axios');
 const { pool }   = require('../db/pool');
 const QRCode     = require('qrcode');
 const { ensureReferralCode, checkAndAwardReferral } = require('../services/referralService');
+const { sendOnboardingStep } = require('./onboardingFlow');
 
 const userProductMap  = {};
 const userCart        = {};
@@ -25,15 +26,19 @@ module.exports = function registerHandlers(bot, tenant) {
     const username   = ctx.from.username || null;
     const firstName  = ctx.from.first_name || 'User';
     const refCode    = ctx.startPayload || null; // kode referral dari link
+    let isNewUser = false;
     try {
       const { rows: [upserted] } = await pool.query(
         `INSERT INTO users (telegram_id, username, first_name, balance, tenant_id)
          VALUES ($1,$2,$3,0,$4)
          ON CONFLICT (telegram_id, tenant_id) DO UPDATE
            SET username=EXCLUDED.username, first_name=EXCLUDED.first_name
-         RETURNING id, referred_by`,
+         RETURNING id, referred_by, onboarding_done`,
         [telegramId, username, firstName, tenantId]
       );
+
+      // User baru = onboarding_done masih false/null
+      isNewUser = !upserted.onboarding_done;
 
       // Pastikan user punya referral_code
       await ensureReferralCode(upserted.id);
@@ -52,10 +57,17 @@ module.exports = function registerHandlers(bot, tenant) {
         }
       }
     } catch (err) { console.error('start insert error:', err.message); }
-    await ctx.reply(
-      `🏪 *Selamat datang di ${tenant.name}!*\n\n👤 Halo, *${firstName}*!\n\nPilih menu di bawah untuk mulai berbelanja. 🛍`,
-      { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
-    );
+
+    if (isNewUser) {
+      // Tampilkan onboarding step pertama untuk user baru
+      await sendOnboardingStep(ctx, 0, tenant, firstName, false);
+    } else {
+      // User lama langsung ke menu
+      await ctx.reply(
+        `🏪 *Selamat datang kembali di ${tenant.name}!*\n\n👤 Halo, *${firstName}*!\n\nPilih menu di bawah untuk mulai berbelanja. 🛍`,
+        { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+      );
+    }
   });
 
   // ── /fileid ───────────────────────────────────────────────
@@ -363,6 +375,34 @@ module.exports = function registerHandlers(bot, tenant) {
     }
   });
 
+
+  // ── Onboarding navigation actions ────────────────────────
+  bot.action(/^onboard_(\d+)$/, async (ctx) => {
+    try { await ctx.answerCbQuery(); } catch {}
+    const step      = parseInt(ctx.match[1]);
+    const firstName = ctx.from.first_name || 'User';
+    await sendOnboardingStep(ctx, step, tenant, firstName, true);
+  });
+
+  bot.action('onboard_done', async (ctx) => {
+    try { await ctx.answerCbQuery('🎉 Selamat berbelanja!'); } catch {}
+    const telegramId = ctx.from.id.toString();
+    const firstName  = ctx.from.first_name || 'User';
+    // Tandai onboarding selesai
+    await pool.query(
+      `UPDATE users SET onboarding_done=true WHERE telegram_id=$1 AND tenant_id=$2`,
+      [telegramId, tenantId]
+    ).catch(err => console.error('onboarding_done update error:', err.message));
+    // Hapus pesan onboarding lama
+    await ctx.deleteMessage().catch(() => {});
+    // Kirim pesan sambutan + menu utama
+    await ctx.reply(
+      `🎉 *Onboarding selesai!*\n\n` +
+      `Selamat datang di *${tenant.name}*, *${firstName}*! 🛍\n\n` +
+      `Gunakan menu di bawah untuk mulai berbelanja.`,
+      { parse_mode: 'Markdown', ...MAIN_KEYBOARD }
+    );
+  });
 
   bot.hears('🗳️ Vote', async (ctx) => {
     try {
