@@ -13,7 +13,6 @@ const sidebarItems = [
   { href: '/dashboard/users',     label: '👤 Users & Saldo' },
   { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
   { href: '/dashboard/votes',     label: '🗳️ Vote' },
-  { href: '/dashboard/referral',  label: '💎 Referral' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
 ];
@@ -32,7 +31,6 @@ const moreNav = [
   { href: '/dashboard/users',     label: '👤 Users & Saldo' },
   { href: '/dashboard/vouchers',  label: '🎟️ Voucher' },
   { href: '/dashboard/votes',     label: '🗳️ Vote' },
-  { href: '/dashboard/referral',  label: '💎 Referral' },
   { href: '/dashboard/broadcast', label: '📢 Broadcast' },
   { href: '/dashboard/settings',  label: '⚙️ Settings' },
 ];
